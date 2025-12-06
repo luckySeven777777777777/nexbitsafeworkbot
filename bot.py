@@ -48,18 +48,18 @@ def main_keyboard():
     kb.row("↩ Return")
     return kb
 
-# ===== Stats Panel =====
+# ===== Stats =====
 def stats_text(uid):
     if uid not in user_sessions:
-        return "No record yet"
+        return "No records"
 
     s = user_sessions[uid]
     return (
         f"👤 User ID: {uid}\n\n"
-        f"🍽 Eat: {s['Eating']} / {MAX_TIMES['Eating']}\n"
-        f"💧 Pee: {s['ToiletSmall']} / {MAX_TIMES['ToiletSmall']}\n"
-        f"🚽 Toilet: {s['ToiletLarge']} / {MAX_TIMES['ToiletLarge']}\n"
-        f"📝 Other: {s['Other']} / {MAX_TIMES['Other']}\n"
+        f"🍽 Eat: {s['Eating']} / {MAX_TIMES['Eating']} TIME\n"
+        f"💧 Pee: {s['ToiletSmall']} / {MAX_TIMES['ToiletSmall']} TIME\n"
+        f"🚽 Toilet: {s['ToiletLarge']} / {MAX_TIMES['ToiletLarge']} TIME\n"
+        f"📝 Other: {s['Other']} / {MAX_TIMES['Other']} TIME\n"
     )
 
 # ===== Send group =====
@@ -101,21 +101,26 @@ def start_activity(uid, name, act):
         bot.send_message(uid, f"❌ {act} limit reached")
         return
 
+    start_dt = datetime.now()
+    start_time = start_dt.strftime("%H:%M:%S")
+
     user_sessions[uid][act] += 1
     user_activity[uid] = {
         "active": act,
-        "time": ACTIVITY_TIMES[act]
+        "time": ACTIVITY_TIMES[act],
+        "start_time": start_time,
+        "start_dt": start_dt
     }
 
-    bot.send_message(uid, f"✅ {act} started")
-    send_group(f"📢 {name} started {act}")
+    bot.send_message(uid, f"✅ {act} started at {start_time}")
+    send_group(f"📢 {name} started {act} at {start_time}")
 
     def countdown():
         if uid not in user_activity:
             return
 
         if user_activity[uid]["time"] <= 0:
-            send_group(f"⏰ {name}'s {act} timed out")
+            send_group(f"⏰ {name}'s {act} timeout")
             return
 
         user_activity[uid]["time"] -= 1
@@ -125,19 +130,20 @@ def start_activity(uid, name, act):
 
 # ===== Check In / Out =====
 def check_in(uid, name):
-    now = datetime.now().strftime("%H:%M")
+    now = datetime.now().strftime("%H:%M:%S")
     if now >= WORK_START or now <= WORK_END:
         CHECK_IN_STATUS[uid] = True
-        bot.send_message(uid, "✅ Check-in successful")
-        send_group(f"✅ {name} checked in")
+        bot.send_message(uid, f"✅ Check-in successful at {now}")
+        send_group(f"✅ {name} checked in at {now}")
     else:
         bot.send_message(uid, "❌ Not within working time")
 
 def check_out(uid, name):
+    now = datetime.now().strftime("%H:%M:%S")
     if uid in CHECK_IN_STATUS:
         del CHECK_IN_STATUS[uid]
-        bot.send_message(uid, "✅ Check-out successful")
-        send_group(f"🏠 {name} checked out")
+        bot.send_message(uid, f"✅ Check-out successful at {now}")
+        send_group(f"🏠 {name} checked out at {now}")
     else:
         bot.send_message(uid, "❌ Please check in first")
 
@@ -146,11 +152,40 @@ def check_out(uid, name):
 def back(message):
     uid = message.from_user.id
     name = message.from_user.first_name
+
     if uid in user_activity:
         act = user_activity[uid]["active"]
+        start_t = user_activity[uid]["start_time"]
+        start_dt = user_activity[uid]["start_dt"]
+
+        end_dt = datetime.now()
+        end_t = end_dt.strftime("%H:%M:%S")
+
+        diff = end_dt - start_dt
+        total_seconds = int(diff.total_seconds())
+        minutes = total_seconds // 60
+        seconds = total_seconds % 60
+        duration = f"{minutes:02d}:{seconds:02d}"
+
         del user_activity[uid]
-        bot.send_message(uid, "✅ Returned to seat\n\n" + stats_text(uid))
-        send_group(f"↩ {name} returned ({act} ended)")
+
+        bot.send_message(
+            uid,
+            f"✅ Returned\n"
+            f"Activity: {act}\n"
+            f"Start: {start_t}\n"
+            f"End: {end_t}\n"
+            f"Duration: {duration}\n\n"
+            + stats_text(uid)
+        )
+
+        send_group(
+            f"↩ {name} returned\n"
+            f"{act}\n"
+            f"Start: {start_t}\n"
+            f"End: {end_t}\n"
+            f"Duration: {duration}"
+        )
 
 # ===== Button handler =====
 @bot.message_handler(func=lambda m: True)
@@ -187,7 +222,7 @@ def test(message):
     if str(message.from_user.id) == str(ADMIN_ID):
         send_group("✅ Group notification test successful")
 
-# ===== Start =====
+# ===== Run =====
 if __name__ == "__main__":
     print("✅ Bot running...")
     bot.infinity_polling()
