@@ -206,6 +206,13 @@ def get_group_chat_id(message):
     print(f"Received message from user: {message.from_user.first_name}")
     print(f"Message content: {message.text}")  # 打印消息内容
     print(f"Message chat ID: {message.chat.id}")  # 打印群组的 chat.id
+    print(f"Message chat title: {message.chat.title}")  # 打印群组标题
+
+    # 确保消息是来自群组
+    if message.chat.type == "supergroup":
+        print(f"Message is from a supergroup")
+    else:
+        print(f"Message is not from a supergroup")
 
     txt = message.text
     uid = message.from_user.id
