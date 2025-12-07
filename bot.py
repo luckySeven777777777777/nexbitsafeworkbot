@@ -202,7 +202,9 @@ def back(message):
 
 # ===== Button handler =====
 @bot.message_handler(func=lambda m: True)
-def handle_text(message):
+def get_group_chat_id(message):
+    print(f"Group Chat ID: {message.chat.id}")  # 打印群组的 chat_id，验证是否正确
+
     txt = message.text
     uid = message.from_user.id
     name = message.from_user.first_name
