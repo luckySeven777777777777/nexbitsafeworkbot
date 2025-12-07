@@ -94,6 +94,7 @@ def start_activity(uid, name, act):
 
     if user_sessions[uid][act] >= MAX_TIMES[act]:
         bot.send_message(uid, f"❌ {act} limit reached.")
+        send_group(f"❌ {name} has reached the limit for {act}.")
         return
 
     start_dt = datetime.now()
