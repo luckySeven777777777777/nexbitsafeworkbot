@@ -90,6 +90,10 @@ def start(message):
 
 # ===== Start Activity =====
 def start_activity(uid, name, act):
+    if uid in user_activity and user_activity[uid]["active"]:
+        bot.send_message(uid, "❌ Please finish your current activity before starting a new one.")
+        return
+
     if uid not in CHECK_IN_STATUS or not CHECK_IN_STATUS.get(uid, False):
         bot.send_message(uid, "❌ Please check in first before starting activities.")
         return
@@ -128,19 +132,17 @@ def start_activity(uid, name, act):
 
 # ===== Check In / Out =====
 def check_in(uid, name):
-    # Check if already checked in
     if uid in CHECK_IN_STATUS and CHECK_IN_STATUS[uid]:
         bot.send_message(uid, "❌ You are already checked in.")
         return
 
     now = datetime.now().strftime("%H:%M:%S")
-    CHECK_IN_STATUS[uid] = True  # Set check-in status to True
-    CHECK_IN_STATUS['start_time'] = datetime.now()  # Record check-in time
+    CHECK_IN_STATUS[uid] = True
+    CHECK_IN_STATUS['start_time'] = datetime.now()
     bot.send_message(uid, f"✅ Check-in successful at {now}")
     send_group(f"✅ {name} checked in at {now}")
 
 def check_out(uid, name):
-    # Check if user has checked in
     if uid not in CHECK_IN_STATUS or not CHECK_IN_STATUS[uid]:
         bot.send_message(uid, "❌ You must check in first.")
         return
@@ -148,7 +150,6 @@ def check_out(uid, name):
     now = datetime.now().strftime("%H:%M:%S")
     check_in_time = CHECK_IN_STATUS.get('start_time')
     if check_in_time:
-        # Calculate time spent from check-in to check-out
         diff = datetime.now() - check_in_time
         total_seconds = int(diff.total_seconds())
         minutes = total_seconds // 60
@@ -156,9 +157,9 @@ def check_out(uid, name):
         duration = f"{minutes:02d}:{seconds:02d}"
         bot.send_message(uid, f"✅ Check-out successful at {now}\nTotal work duration: {duration}")
         send_group(f"🏠 {name} checked out at {now}\nWork duration: {duration}")
-    
-    del CHECK_IN_STATUS[uid]  # Remove check-in status
-    del CHECK_IN_STATUS['start_time']  # Clear check-in time
+
+    del CHECK_IN_STATUS[uid]
+    del CHECK_IN_STATUS['start_time']
 
 # ===== Return =====
 @bot.message_handler(func=lambda m: "Return" in m.text)
@@ -204,15 +205,9 @@ def back(message):
 @bot.message_handler(func=lambda m: True)
 def get_group_chat_id(message):
     print(f"Received message from user: {message.from_user.first_name}")
-    print(f"Message content: {message.text}")  # 打印消息内容
-    print(f"Message chat ID: {message.chat.id}")  # 打印群组的 chat.id
-    print(f"Message chat title: {message.chat.title}")  # 打印群组标题
-
-    # 确保消息是来自群组
-    if message.chat.type == "supergroup":
-        print(f"Message is from a supergroup")
-    else:
-        print(f"Message is not from a supergroup")
+    print(f"Message content: {message.text}")
+    print(f"Message chat ID: {message.chat.id}")
+    print(f"Message chat title: {message.chat.title}")
 
     txt = message.text
     uid = message.from_user.id
