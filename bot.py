@@ -17,7 +17,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 # ===== Config =====
 ACTIVITY_TIMES = {
     "Eating": 30,
-    "ToiletLarge": 10,
+    "ToiletLarge": 15,  # 修改为15分钟
     "ToiletSmall": 10,
     "Smoking": 15,
     "Other": 15,
@@ -96,6 +96,10 @@ def start_activity(uid, name, act):
             "Eating": 0, "ToiletLarge": 0,
             "ToiletSmall": 0, "Smoking": 0, "Other": 0
         }
+
+    if uid not in CHECK_IN_STATUS:
+        bot.send_message(uid, "❌ Please check in first before starting activities.")
+        return
 
     if user_sessions[uid][act] >= MAX_TIMES[act]:
         bot.send_message(uid, f"❌ {act} limit reached")
