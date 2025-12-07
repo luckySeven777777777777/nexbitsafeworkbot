@@ -19,7 +19,7 @@ ACTIVITY_TIMES = {
     "Eating": 30,
     "ToiletLarge": 15,  # 修改为15分钟
     "ToiletSmall": 10,
-    "Smoking": 15,
+    "Smoking": 10,
     "Other": 15,
 }
 
@@ -202,7 +202,9 @@ def back(message):
 
 # ===== Button handler =====
 @bot.message_handler(func=lambda m: True)
-def handle_text(message):
+def get_group_chat_id(message):
+    print(f"Group Chat ID: {message.chat.id}")
+
     txt = message.text
     uid = message.from_user.id
     name = message.from_user.first_name
