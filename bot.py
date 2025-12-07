@@ -31,9 +31,6 @@ MAX_TIMES = {
     "Other": 2,
 }
 
-WORK_START = "18:30"
-WORK_END = "06:30"
-
 # ===== Memory =====
 user_activity = {}
 user_sessions = {}
@@ -134,20 +131,30 @@ def start_activity(uid, name, act):
 
 # ===== Check In / Out =====
 def check_in(uid, name):
+    # 使用当前时间进行签到，不受工作时间限制
     now = datetime.now().strftime("%H:%M:%S")
-    if now >= WORK_START or now <= WORK_END:
-        CHECK_IN_STATUS[uid] = True
-        bot.send_message(uid, f"✅ Check-in successful at {now}")
-        send_group(f"✅ {name} checked in at {now}")
-    else:
-        bot.send_message(uid, "❌ Not within working time")
+    CHECK_IN_STATUS[uid] = True  # 设置用户签到状态为True
+    CHECK_IN_STATUS['start_time'] = datetime.now()  # 记录签到的时间
+    bot.send_message(uid, f"✅ Check-in successful at {now}")
+    send_group(f"✅ {name} checked in at {now}")
 
 def check_out(uid, name):
     now = datetime.now().strftime("%H:%M:%S")
     if uid in CHECK_IN_STATUS:
-        del CHECK_IN_STATUS[uid]
-        bot.send_message(uid, f"✅ Check-out successful at {now}")
-        send_group(f"🏠 {name} checked out at {now}")
+        # 计算用户上班时间
+        check_in_time = CHECK_IN_STATUS.get('start_time')
+        if check_in_time:
+            # 计算从签到到签出的时间
+            diff = datetime.now() - check_in_time
+            total_seconds = int(diff.total_seconds())
+            minutes = total_seconds // 60
+            seconds = total_seconds % 60
+            duration = f"{minutes:02d}:{seconds:02d}"
+            bot.send_message(uid, f"✅ Check-out successful at {now}\nTotal work duration: {duration}")
+            send_group(f"🏠 {name} checked out at {now}\nWork duration: {duration}")
+        
+        del CHECK_IN_STATUS[uid]  # 删除签到状态
+        del CHECK_IN_STATUS['start_time']  # 清除签到时间
     else:
         bot.send_message(uid, "❌ Please check in first")
 
