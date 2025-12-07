@@ -203,8 +203,10 @@ def back(message):
 # ===== Button handler =====
 @bot.message_handler(func=lambda m: True)
 def get_group_chat_id(message):
-    print(f"Received message: {message.text}")  # 打印接收到的消息内容
-    print(f"Group Chat ID: {message.chat.id}")  
+    print(f"Received message from user: {message.from_user.first_name}")
+    print(f"Message content: {message.text}")  # 打印消息内容
+    print(f"Message chat ID: {message.chat.id}")  # 打印群组的 chat.id
+
     txt = message.text
     uid = message.from_user.id
     name = message.from_user.first_name
