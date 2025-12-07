@@ -88,12 +88,6 @@ def start(message):
 
 # ===== Start Activity =====
 def start_activity(uid, name, act):
-    if uid not in user_sessions:
-        user_sessions[uid] = {
-            "Eating": 0, "ToiletLarge": 0,
-            "ToiletSmall": 0, "Smoking": 0, "Other": 0
-        }
-
     if uid not in CHECK_IN_STATUS or not CHECK_IN_STATUS.get(uid, False):
         bot.send_message(uid, "❌ Please check in first before starting activities.")
         return
