@@ -19,7 +19,7 @@ ACTIVITY_TIMES = {
     "Eating": 30,
     "ToiletLarge": 15,  # 修改为15分钟
     "ToiletSmall": 10,
-    "Smoking": 15,
+    "Smoking": 10,
     "Other": 15,
 }
 
@@ -64,8 +64,8 @@ def send_group(msg):
     if GROUP_CHAT_ID:
         try:
             bot.send_message(GROUP_CHAT_ID, msg)
-        except:
-            pass
+        except Exception as e:
+            print(f"Error sending to group: {e}")
 
 # ===== /start =====
 @bot.message_handler(commands=["start"])
