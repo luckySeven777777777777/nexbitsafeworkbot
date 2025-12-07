@@ -8,7 +8,6 @@ from telebot.types import ReplyKeyboardMarkup
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROUP_CHAT_ID = os.getenv("GROUP_CHAT_ID")
 ADMIN_ID = os.getenv("ADMIN_ID")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 if not BOT_TOKEN:
     raise Exception("❌ BOT_TOKEN is not set")
@@ -233,8 +232,7 @@ def test(message):
     if str(message.from_user.id) == str(ADMIN_ID):
         send_group("✅ Group notification test successful")
 
-# ===== Webhook setup =====
+# ===== Run with long polling =====
 if __name__ == "__main__":
     print("✅ Bot running...")
-    bot.remove_webhook()  # Ensure any previous webhook is removed
-    bot.set_webhook(url=WEBHOOK_URL)  # Set new webhook
+    bot.infinity_polling()  # This will keep the bot running using long polling
