@@ -19,7 +19,7 @@ ACTIVITY_TIMES = {
     "Eating": 30,
     "ToiletLarge": 15,  # 修改为15分钟
     "ToiletSmall": 10,
-    "Smoking": 10,
+    "Smoking": 15,
     "Other": 15,
 }
 
