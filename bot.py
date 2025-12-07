@@ -61,7 +61,7 @@ def stats_text(uid):
 
 # ===== Send group =====
 def send_group(msg):
-    print(f"Sending to group: {msg}")  # Debugging to check if the function is being called
+    print(f"Preparing to send to group: {msg}")  # Debugging to check if the function is being called
     if GROUP_CHAT_ID:
         try:
             bot.send_message(GROUP_CHAT_ID, msg)
@@ -202,9 +202,7 @@ def back(message):
 
 # ===== Button handler =====
 @bot.message_handler(func=lambda m: True)
-def get_group_chat_id(message):
-    print(f"Group Chat ID: {message.chat.id}")
-
+def handle_text(message):
     txt = message.text
     uid = message.from_user.id
     name = message.from_user.first_name
