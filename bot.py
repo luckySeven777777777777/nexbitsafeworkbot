@@ -61,15 +61,13 @@ def stats_text(uid):
 
 # ===== Send group =====
 def send_group(msg):
-    # Debugging message to ensure send_group is being called
-    print(f"Sending to group: {msg}")
-    
+    print(f"Sending to group: {msg}")  # Debugging to check if the function is being called
     if GROUP_CHAT_ID:
         try:
             bot.send_message(GROUP_CHAT_ID, msg)
-            print("Message sent to group successfully.")
+            print("Message sent to group successfully.")  # Success message in the logs
         except Exception as e:
-            print(f"Error sending message to group: {e}")
+            print(f"Error sending message to group: {e}")  # More detailed error logging
 
 # ===== /start =====
 @bot.message_handler(commands=["start"])
