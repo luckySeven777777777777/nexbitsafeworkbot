@@ -44,12 +44,12 @@ activity_timeout = {}
 # ===== Keyboard =====
 def main_keyboard():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.row("✅ Start")   # 👈 新增这一行（最上面）
     kb.row("🍽 Eat", "📝 Other")
     kb.row("💧 Pee", "🚽 Toilet")
     kb.row("🏢 Check In", "🏠 Check Out")
     kb.row("↩ Return")
     return kb
-
 # ===== Stats =====
 def stats_text(uid):
     if uid not in user_sessions:
@@ -69,10 +69,16 @@ def send_group(msg):
     if GROUP_CHAT_ID:
         bot.send_message(GROUP_CHAT_ID, msg)
 
-# ===== /start =====
+# ===== /start command =====
 @bot.message_handler(commands=["start"])
-def start(message):
+def start_cmd(message):
     uid = message.from_user.id
+    chat_id = message.chat.id
+    show_panel(chat_id, uid)
+
+
+# ===== Show panel (shared by /start & Start button) =====
+def show_panel(chat_id, uid):
     if uid not in user_sessions:
         user_sessions[uid] = {
             "Eating": 0,
@@ -81,15 +87,15 @@ def start(message):
             "Smoking": 0,
             "Other": 0,
         }
+
     if uid not in user_logs:
         user_logs[uid] = []
 
     bot.send_message(
-        message.chat.id,
+        chat_id,
         "✅ Panel activated\n\n" + stats_text(uid),
         reply_markup=main_keyboard()
     )
-
 # ===== Start Activity =====
 def start_activity(uid, name, act):
     if uid in user_activity:
@@ -201,7 +207,10 @@ def handler(message):
     name = message.from_user.first_name
     txt = message.text
 
-    if "Eat" in txt:
+    if "Start" in txt:
+        show_panel(message.chat.id, uid)
+
+    elif "Eat" in txt:
         start_activity(uid, name, "Eating")
     elif "Pee" in txt:
         start_activity(uid, name, "ToiletSmall")
@@ -213,6 +222,7 @@ def handler(message):
         check_in(uid, name)
     elif "Check Out" in txt:
         check_out(uid, name)
+
 
 # ===== Run =====
 if __name__ == "__main__":
