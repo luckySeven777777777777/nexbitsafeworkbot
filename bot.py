@@ -17,7 +17,7 @@ bot = telebot.TeleBot(BOT_TOKEN)
 # ===== Config =====
 ACTIVITY_TIMES = {
     "Eating": 30,
-    "ToiletLarge": 15,  # 修改为15分钟
+    "ToiletLarge": 15,
     "ToiletSmall": 10,
     "Smoking": 10,
     "Other": 15,
@@ -35,6 +35,10 @@ MAX_TIMES = {
 user_activity = {}
 user_sessions = {}
 CHECK_IN_STATUS = {}
+
+# ===== ERA Style Logs (NEW) =====
+user_logs = {}
+activity_timeout = {}
 
 # ===== Keyboard =====
 def main_keyboard():
@@ -61,13 +65,8 @@ def stats_text(uid):
 
 # ===== Send group =====
 def send_group(msg):
-    print(f"Preparing to send to group: {msg}")  # Debugging to check if the function is being called
     if GROUP_CHAT_ID:
-        try:
-            bot.send_message(GROUP_CHAT_ID, msg)
-            print("Message sent to group successfully.")  # Success message in the logs
-        except Exception as e:
-            print(f"Error sending message to group: {e}")  # More detailed error logging
+        bot.send_message(GROUP_CHAT_ID, msg)
 
 # ===== /start =====
 @bot.message_handler(commands=["start"])
@@ -81,6 +80,8 @@ def start(message):
             "Smoking": 0,
             "Other": 0,
         }
+    if uid not in user_logs:
+        user_logs[uid] = []
 
     bot.send_message(
         message.chat.id,
@@ -90,76 +91,64 @@ def start(message):
 
 # ===== Start Activity =====
 def start_activity(uid, name, act):
-    if uid in user_activity and user_activity[uid]["active"]:
-        bot.send_message(uid, "❌ Please finish your current activity before starting a new one.")
+    if uid in user_activity:
+        bot.send_message(uid, "❌ Please finish your current activity first.")
         return
 
-    if uid not in CHECK_IN_STATUS or not CHECK_IN_STATUS.get(uid, False):
-        bot.send_message(uid, "❌ Please check in first before starting activities.")
+    if uid not in CHECK_IN_STATUS:
+        bot.send_message(uid, "❌ Please check in first.")
         return
 
     if user_sessions[uid][act] >= MAX_TIMES[act]:
         bot.send_message(uid, f"❌ {act} limit reached.")
-        send_group(f"❌ {name} has reached the limit for {act}.")
         return
 
     start_dt = datetime.now()
-    start_time = start_dt.strftime("%H:%M:%S")
-
     user_sessions[uid][act] += 1
+
     user_activity[uid] = {
-        "active": act,
-        "time": ACTIVITY_TIMES[act],
-        "start_time": start_time,
+        "act": act,
         "start_dt": start_dt
     }
+    activity_timeout[uid] = False
 
-    bot.send_message(uid, f"✅ {act} started at {start_time}")
-    send_group(f"📢 {name} started {act} at {start_time}")
+    bot.send_message(uid, f"✅ {act} started at {start_dt.strftime('%H:%M:%S')}")
+    send_group(f"📢 {name} started {act} at {start_dt.strftime('%H:%M:%S')}")
 
     def countdown():
         if uid not in user_activity:
             return
-
-        if user_activity[uid]["time"] <= 0:
-            send_group(f"⏰ {name}'s {act} timeout")
+        elapsed = (datetime.now() - start_dt).total_seconds() / 60
+        if elapsed >= ACTIVITY_TIMES[act]:
+            activity_timeout[uid] = True
+            send_group(f"⏰ {name} {act} TIMEOUT ⚠️")
             return
-
-        user_activity[uid]["time"] -= 1
         threading.Timer(60, countdown).start()
 
     countdown()
 
 # ===== Check In / Out =====
 def check_in(uid, name):
-    if uid in CHECK_IN_STATUS and CHECK_IN_STATUS[uid]:
+    if uid in CHECK_IN_STATUS:
         bot.send_message(uid, "❌ You are already checked in.")
         return
 
-    now = datetime.now().strftime("%H:%M:%S")
-    CHECK_IN_STATUS[uid] = True
-    CHECK_IN_STATUS['start_time'] = datetime.now()
-    bot.send_message(uid, f"✅ Check-in successful at {now}")
-    send_group(f"✅ {name} checked in at {now}")
+    CHECK_IN_STATUS[uid] = datetime.now()
+    send_group(f"✅ {name} checked in at {CHECK_IN_STATUS[uid].strftime('%H:%M:%S')}")
 
 def check_out(uid, name):
-    if uid not in CHECK_IN_STATUS or not CHECK_IN_STATUS[uid]:
+    if uid not in CHECK_IN_STATUS:
         bot.send_message(uid, "❌ You must check in first.")
         return
 
-    now = datetime.now().strftime("%H:%M:%S")
-    check_in_time = CHECK_IN_STATUS.get('start_time')
-    if check_in_time:
-        diff = datetime.now() - check_in_time
-        total_seconds = int(diff.total_seconds())
-        minutes = total_seconds // 60
-        seconds = total_seconds % 60
-        duration = f"{minutes:02d}:{seconds:02d}"
-        bot.send_message(uid, f"✅ Check-out successful at {now}\nTotal work duration: {duration}")
-        send_group(f"🏠 {name} checked out at {now}\nWork duration: {duration}")
-
+    start = CHECK_IN_STATUS[uid]
+    end = datetime.now()
+    diff = end - start
+    send_group(
+        f"🏠 {name} checked out\n"
+        f"Work duration: {int(diff.total_seconds()//60):02d}:{int(diff.total_seconds()%60):02d}"
+    )
     del CHECK_IN_STATUS[uid]
-    del CHECK_IN_STATUS['start_time']
 
 # ===== Return =====
 @bot.message_handler(func=lambda m: "Return" in m.text)
@@ -167,81 +156,63 @@ def back(message):
     uid = message.from_user.id
     name = message.from_user.first_name
 
-    if uid in user_activity:
-        act = user_activity[uid]["active"]
-        start_t = user_activity[uid]["start_time"]
-        start_dt = user_activity[uid]["start_dt"]
+    if uid not in user_activity:
+        return
 
-        end_dt = datetime.now()
-        end_t = end_dt.strftime("%H:%M:%S")
+    act = user_activity[uid]["act"]
+    start_dt = user_activity[uid]["start_dt"]
+    end_dt = datetime.now()
 
-        diff = end_dt - start_dt
-        total_seconds = int(diff.total_seconds())
-        minutes = total_seconds // 60
-        seconds = total_seconds % 60
-        duration = f"{minutes:02d}:{seconds:02d}"
+    duration = end_dt - start_dt
+    timeout_flag = activity_timeout.get(uid, False)
 
-        del user_activity[uid]
+    log = {
+        "act": act,
+        "start": start_dt.strftime("%H:%M:%S"),
+        "end": end_dt.strftime("%H:%M:%S"),
+        "duration": f"{int(duration.total_seconds()//60):02d}:{int(duration.total_seconds()%60):02d}",
+        "timeout": timeout_flag
+    }
+    user_logs.setdefault(uid, []).append(log)
 
-        bot.send_message(
-            uid,
-            f"✅ Returned\n"
-            f"Activity: {act}\n"
-            f"Start: {start_t}\n"
-            f"End: {end_t}\n"
-            f"Duration: {duration}\n\n"
-            + stats_text(uid)
-        )
+    bot.send_message(uid, "✅ Returned\n" + stats_text(uid))
 
-        send_group(
-            f"↩ {name} returned\n"
-            f"{act}\n"
-            f"Start: {start_t}\n"
-            f"End: {end_t}\n"
-            f"Duration: {duration}"
-        )
+    send_group(
+        f"👤 {name}\n"
+        f"🍽 {user_sessions[uid]['Eating']} / {MAX_TIMES['Eating']}  "
+        f"💧 {user_sessions[uid]['ToiletSmall']} / {MAX_TIMES['ToiletSmall']}  "
+        f"🚽 {user_sessions[uid]['ToiletLarge']} / {MAX_TIMES['ToiletLarge']}  "
+        f"📝 {user_sessions[uid]['Other']} / {MAX_TIMES['Other']}\n\n"
+        f"↩ Returned\n"
+        f"{act}\n"
+        f"Start: {log['start']}\n"
+        f"End: {log['end']}\n"
+        f"Duration: {log['duration']}{' ⚠️' if timeout_flag else ''}"
+    )
+
+    del user_activity[uid]
+    del activity_timeout[uid]
 
 # ===== Button handler =====
 @bot.message_handler(func=lambda m: True)
-def get_group_chat_id(message):
-    print(f"Received message from user: {message.from_user.first_name}")
-    print(f"Message content: {message.text}")
-    print(f"Message chat ID: {message.chat.id}")
-    print(f"Message chat title: {message.chat.title}")
-
-    txt = message.text
+def handler(message):
     uid = message.from_user.id
     name = message.from_user.first_name
+    txt = message.text
 
     if "Eat" in txt:
         start_activity(uid, name, "Eating")
-        bot.send_message(uid, stats_text(uid))
-
     elif "Pee" in txt:
         start_activity(uid, name, "ToiletSmall")
-        bot.send_message(uid, stats_text(uid))
-
     elif "Toilet" in txt:
         start_activity(uid, name, "ToiletLarge")
-        bot.send_message(uid, stats_text(uid))
-
     elif "Other" in txt:
         start_activity(uid, name, "Other")
-        bot.send_message(uid, stats_text(uid))
-
     elif "Check In" in txt:
         check_in(uid, name)
-
     elif "Check Out" in txt:
         check_out(uid, name)
 
-# ===== Admin test =====
-@bot.message_handler(commands=["test"])
-def test(message):
-    if str(message.from_user.id) == str(ADMIN_ID):
-        send_group("✅ Group notification test successful")
-
-# ===== Run with long polling =====
+# ===== Run =====
 if __name__ == "__main__":
-    print("✅ Bot running...")
-    bot.infinity_polling()  # This will keep the bot running using long polling
+    bot.infinity_polling()
