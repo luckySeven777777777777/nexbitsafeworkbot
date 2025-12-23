@@ -1,9 +1,17 @@
 import os
 import threading
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import telebot
 from telebot.types import ReplyKeyboardMarkup
 
+# ===== Timezone =====
+LOCAL_TZ = ZoneInfo("Asia/Yangon")  # 缅甸
+# 如果是中国用：ZoneInfo("Asia/Shanghai")
+
+def now():
+    print("USING LOCAL TZ:", LOCAL_TZ)
+    return datetime.now(LOCAL_TZ)
 # ===== Load env =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROUP_CHAT_ID = os.getenv("GROUP_CHAT_ID")
@@ -104,7 +112,7 @@ def start_activity(uid, name, act):
         bot.send_message(uid, f"❌ {act} limit reached.")
         return
 
-    start_dt = datetime.now()
+    start_dt = now()
     user_sessions[uid][act] += 1
 
     user_activity[uid] = {
@@ -119,7 +127,7 @@ def start_activity(uid, name, act):
     def countdown():
         if uid not in user_activity:
             return
-        elapsed = (datetime.now() - start_dt).total_seconds() / 60
+        elapsed = (now() - start_dt).total_seconds() / 60
         if elapsed >= ACTIVITY_TIMES[act]:
             activity_timeout[uid] = True
             send_group(f"⏰ {name} {act} TIMEOUT ⚠️")
@@ -127,23 +135,21 @@ def start_activity(uid, name, act):
         threading.Timer(60, countdown).start()
 
     countdown()
-
 # ===== Check In / Out =====
 def check_in(uid, name):
     if uid in CHECK_IN_STATUS:
         bot.send_message(uid, "❌ You are already checked in.")
         return
 
-    CHECK_IN_STATUS[uid] = datetime.now()
+    CHECK_IN_STATUS[uid] = now()
     send_group(f"✅ {name} checked in at {CHECK_IN_STATUS[uid].strftime('%H:%M:%S')}")
-
 def check_out(uid, name):
     if uid not in CHECK_IN_STATUS:
         bot.send_message(uid, "❌ You must check in first.")
         return
 
     start = CHECK_IN_STATUS[uid]
-    end = datetime.now()
+    end = now()
     diff = end - start
     send_group(
         f"🏠 {name} checked out\n"
@@ -162,10 +168,11 @@ def back(message):
 
     act = user_activity[uid]["act"]
     start_dt = user_activity[uid]["start_dt"]
-    end_dt = datetime.now()
+    end_dt = now()
 
     duration = end_dt - start_dt
     timeout_flag = activity_timeout.get(uid, False)
+
 
     log = {
         "act": act,
@@ -174,6 +181,7 @@ def back(message):
         "duration": f"{int(duration.total_seconds()//60):02d}:{int(duration.total_seconds()%60):02d}",
         "timeout": timeout_flag
     }
+
     user_logs.setdefault(uid, []).append(log)
 
     bot.send_message(uid, "✅ Returned\n" + stats_text(uid))
