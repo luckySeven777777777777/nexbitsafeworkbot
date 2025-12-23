@@ -37,6 +37,9 @@ user_activity = {}
 user_sessions = {}
 CHECK_IN_STATUS = {}
 
+# ===== Timeout repeat reminder =====
+timeout_reminder_tasks = {}
+
 # ===== ERA Style Logs (NEW) =====
 user_logs = {}
 activity_timeout = {}
@@ -67,7 +70,7 @@ def stats_text(uid):
 # ===== Send group =====
 def send_group(msg):
     if GROUP_CHAT_ID:
-        bot.send_message(GROUP_CHAT_ID, msg)
+        bot.send_message(GROUP_CHAT_ID, msg, parse_mode="HTML")
 
 # ===== /start =====
 @bot.message_handler(commands=["start"])
@@ -119,15 +122,52 @@ def start_activity(uid, name, act):
     def countdown():
         if uid not in user_activity:
             return
+
         elapsed = (datetime.now() - start_dt).total_seconds() / 60
+
         if elapsed >= ACTIVITY_TIMES[act]:
             activity_timeout[uid] = True
-            send_group(f"⏰ {name} {act} TIMEOUT ⚠️")
+
+            # 防止重复创建 5 分钟提醒
+            if uid in timeout_reminder_tasks:
+                return
+
+            admin_tag = (
+                f"<a href='tg://user?id={ADMIN_ID}'>@ADMIN</a>"
+                if ADMIN_ID else "@ADMIN"
+            )
+
+            def repeat_reminder():
+                if uid not in user_activity:
+                    return
+
+                send_group(
+                    f"⏰ <b>TIMEOUT</b>\n"
+                    f"👤 {name}\n"
+                    f"📌 {act}\n"
+                    f"{admin_tag}"
+                )
+
+                t = threading.Timer(300, repeat_reminder)
+                timeout_reminder_tasks[uid] = t
+                t.start()
+
+            # 第一次超时立即提醒
+            send_group(
+                f"⏰ <b>TIMEOUT</b>\n"
+                f"👤 {name}\n"
+                f"📌 {act}\n"
+                f"{admin_tag}"
+            )
+
+            t = threading.Timer(300, repeat_reminder)
+            timeout_reminder_tasks[uid] = t
+            t.start()
             return
+
         threading.Timer(60, countdown).start()
 
     countdown()
-
 # ===== Check In / Out =====
 def check_in(uid, name):
     if uid in CHECK_IN_STATUS:
@@ -190,6 +230,10 @@ def back(message):
         f"End: {log['end']}\n"
         f"Duration: {log['duration']}{' ⚠️' if timeout_flag else ''}"
     )
+ # ✅ 停止超时重复提醒（必须在这里）
+    if uid in timeout_reminder_tasks:
+        timeout_reminder_tasks[uid].cancel()
+        del timeout_reminder_tasks[uid]
 
     del user_activity[uid]
     del activity_timeout[uid]
