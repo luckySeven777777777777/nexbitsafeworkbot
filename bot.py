@@ -13,7 +13,7 @@ if not BOT_TOKEN:
     raise Exception("❌ BOT_TOKEN is not set")
 
 bot = telebot.TeleBot(BOT_TOKEN)
-bot.remove_webhook(drop_pending_updates=True)
+
 
 # ===== Config =====
 ACTIVITY_TIMES = {
@@ -216,7 +216,7 @@ def handler(message):
 
 # ===== Run =====
 if __name__ == "__main__":
-    print("Bot started")
+    print("🤖 Bot started")
     bot.infinity_polling(
         skip_pending=True,
         timeout=20,
