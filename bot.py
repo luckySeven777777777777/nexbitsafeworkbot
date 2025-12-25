@@ -126,20 +126,22 @@ def start_activity(uid, name, act):
     current = user_sessions[uid][act]
     remain = MAX_TIMES[act] - current
 
-bot.send_message(
-    uid,
-    f"👤 {name}\n"
-    f"📅 Time：{start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
-    f"✅ 活动：{act}\n"
-    f"⚠️ 这是您第 {current} 次，本班次剩余 {remain} 次\n"
-    f"⏱ 最长 {ACTIVITY_TIMES[act]} 分钟\n\n"
-    f"👇 活动完成后请点击【回座】",
-    reply_markup=main_keyboard()
-)
+    # 👉 私聊提示 + 下发 Return 键盘
+    bot.send_message(
+        uid,
+        f"👤 {name}\n"
+        f"📅 Time：{start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"✅ 活动：{act}\n"
+        f"⚠️ 这是您第 {current} 次，本班次剩余 {remain} 次\n"
+        f"⏱ 最长 {ACTIVITY_TIMES[act]} 分钟\n\n"
+        f"👇 活动完成后请点击【回座】",
+        reply_markup=main_keyboard()
+    )
 
-
+    # 👉 群提示
     send_group(f"📢 {name} started {act} at {start_dt.strftime('%H:%M:%S')}")
 
+    # 👉 超时检测
     def countdown():
         if uid not in user_activity:
             return
