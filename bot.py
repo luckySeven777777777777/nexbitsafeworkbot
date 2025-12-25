@@ -52,13 +52,12 @@ activity_timeout = {}
 # ===== Keyboard =====
 def main_keyboard():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.row("🍽 Eat", "🚬 Smoke")
+    kb.row("🍽 Eat", "🚬 Smoking")
     kb.row("💧 Pee", "🚽 Toilet")
     kb.row("📝 Other")
     kb.row("🏢 Check In", "🏠 Check Out")
     kb.row("↩ Return")
     return kb
-
 
 # ===== Stats =====
 def stats_text(uid):
@@ -69,9 +68,9 @@ def stats_text(uid):
     return (
         f"👤 User ID: {uid}\n\n"
         f"🍽 Eat: {s['Eating']} / {MAX_TIMES['Eating']} TIME\n"
-        f"🚬 Smoke: {s['Smoking']} / {MAX_TIMES['Smoking']} TIME\n"
         f"💧 Pee: {s['ToiletSmall']} / {MAX_TIMES['ToiletSmall']} TIME\n"
         f"🚽 Toilet: {s['ToiletLarge']} / {MAX_TIMES['ToiletLarge']} TIME\n"
+        f"🚬 Smoking: {s['Smoking']} / {MAX_TIMES['Smoking']} TIME\n"
         f"📝 Other: {s['Other']} / {MAX_TIMES['Other']} TIME\n"
     )
 
@@ -161,7 +160,7 @@ def check_out(uid, name):
 
     send_group(
         f"🏠 {name} checked out\n"
-        f"Work duration: {hours}hour : {minutes}min"
+        f"Work duration: {hours} hour : {minutes} min"
     )
 
     del CHECK_IN_STATUS[uid]
@@ -200,6 +199,7 @@ def back(message):
         f"🍽 {user_sessions[uid]['Eating']} / {MAX_TIMES['Eating']}  "
         f"💧 {user_sessions[uid]['ToiletSmall']} / {MAX_TIMES['ToiletSmall']}  "
         f"🚽 {user_sessions[uid]['ToiletLarge']} / {MAX_TIMES['ToiletLarge']}  "
+        f"🚬 Smoking: {user_sessions[uid]['Smoking']} / {MAX_TIMES['Smoking']} "
         f"📝 {user_sessions[uid]['Other']} / {MAX_TIMES['Other']}\n\n"
         f"↩ Returned\n"
         f"{act}\n"
@@ -220,7 +220,7 @@ def handler(message):
 
     if "Eat" in txt:
         start_activity(uid, name, "Eating")
-    elif "Smoke" in txt:
+    elif "Smoking" in txt:
         start_activity(uid, name, "Smoking")
     elif "Pee" in txt:
         start_activity(uid, name, "ToiletSmall")
@@ -232,6 +232,7 @@ def handler(message):
         check_in(uid, name)
     elif "Check Out" in txt:
         check_out(uid, name)
+
 
 # ===== Run =====
 if __name__ == "__main__":
