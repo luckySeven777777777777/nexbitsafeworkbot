@@ -44,7 +44,7 @@ MAX_TIMES = {
 user_activity = {}
 user_sessions = {}
 CHECK_IN_STATUS = {}
-
+user_work_seconds = {}   # 实际工作秒（已扣除活动）
 # ===== ERA Style Logs (NEW) =====
 user_logs = {}
 activity_timeout = {}
@@ -52,8 +52,9 @@ activity_timeout = {}
 # ===== Keyboard =====
 def main_keyboard():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.row("🍽 Eat", "📝 Other")
+    kb.row("🍽 Eat", "🚬 Smoke")
     kb.row("💧 Pee", "🚽 Toilet")
+    kb.row("📝 Other")
     kb.row("🏢 Check In", "🏠 Check Out")
     kb.row("↩ Return")
     return kb
@@ -69,6 +70,7 @@ def stats_text(uid):
         f"🍽 Eat: {s['Eating']} / {MAX_TIMES['Eating']} TIME\n"
         f"💧 Pee: {s['ToiletSmall']} / {MAX_TIMES['ToiletSmall']} TIME\n"
         f"🚽 Toilet: {s['ToiletLarge']} / {MAX_TIMES['ToiletLarge']} TIME\n"
+        f"🚬 Smoke: {s['Smoking']} / {MAX_TIMES['Smoking']} TIME\n"
         f"📝 Other: {s['Other']} / {MAX_TIMES['Other']} TIME\n"
     )
 
@@ -121,7 +123,19 @@ def start_activity(uid, name, act):
     }
     activity_timeout[uid] = False
 
-    bot.send_message(uid, f"✅ {act} started at {start_dt.strftime('%H:%M:%S')}")
+    current = user_sessions[uid][act]
+    remain = MAX_TIMES[act] - current
+
+    bot.send_message(
+        uid,
+        f"👤 {name}\n"
+        f"📅 时间：{start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"✅ 活动：{act}\n"
+        f"⚠️ 这是您第 {current} 次，本班次剩余 {remain} 次\n"
+        f"⏱ 最长 {ACTIVITY_TIMES[act]} 分钟\n\n"
+        f"👇 活动完成后请点击【回座】"
+    )
+
     send_group(f"📢 {name} started {act} at {start_dt.strftime('%H:%M:%S')}")
 
     def countdown():
@@ -142,23 +156,35 @@ def check_in(uid, name):
         return
 
     CHECK_IN_STATUS[uid] = now()
+    user_work_seconds[uid] = 0
+
     send_group(f"✅ {name} checked in at {CHECK_IN_STATUS[uid].strftime('%H:%M:%S')}")
+
+
 def check_out(uid, name):
     if uid not in CHECK_IN_STATUS:
         bot.send_message(uid, "❌ You must check in first.")
         return
 
-    start = CHECK_IN_STATUS[uid]
-    end = now()
-    diff = end - start
+    # ✅ 补最后一段“坐在工位的时间”
+    last_gap = (now() - CHECK_IN_STATUS[uid]).total_seconds()
+    user_work_seconds[uid] += int(last_gap)
+
+    total_seconds = user_work_seconds.get(uid, 0)
+
+    h = total_seconds // 3600
+    m = (total_seconds % 3600) // 60
+    s = total_seconds % 60
+
     send_group(
         f"🏠 {name} checked out\n"
-        f"Work duration: {int(diff.total_seconds()//60):02d}:{int(diff.total_seconds()%60):02d}"
+        f"Work duration: {h:02d}:{m:02d}:{s:02d}"
     )
-    del CHECK_IN_STATUS[uid]
 
+    del CHECK_IN_STATUS[uid]
+    del user_work_seconds[uid]
 # ===== Return =====
-@bot.message_handler(func=lambda m: "Return" in m.text)
+@bot.message_handler(func=lambda m: m.text in ["↩ Return", "回座", "Return"])
 def back(message):
     uid = message.from_user.id
     name = message.from_user.first_name
@@ -170,9 +196,15 @@ def back(message):
     start_dt = user_activity[uid]["start_dt"]
     end_dt = now()
 
+    # 1️⃣ 累加“坐在工位的时间”
+    work_gap = (start_dt - CHECK_IN_STATUS[uid]).total_seconds()
+    user_work_seconds[uid] += int(work_gap)
+
+    # 2️⃣ 更新当前坐席起点
+    CHECK_IN_STATUS[uid] = end_dt
+
     duration = end_dt - start_dt
     timeout_flag = activity_timeout.get(uid, False)
-
 
     log = {
         "act": act,
@@ -201,7 +233,6 @@ def back(message):
 
     del user_activity[uid]
     del activity_timeout[uid]
-
 # ===== Button handler =====
 @bot.message_handler(func=lambda m: True)
 def handler(message):
@@ -211,6 +242,8 @@ def handler(message):
 
     if "Eat" in txt:
         start_activity(uid, name, "Eating")
+    elif "Smoke" in txt:
+        start_activity(uid, name, "Smoking")
     elif "Pee" in txt:
         start_activity(uid, name, "ToiletSmall")
     elif "Toilet" in txt:
@@ -221,6 +254,7 @@ def handler(message):
         check_in(uid, name)
     elif "Check Out" in txt:
         check_out(uid, name)
+
 
 # ===== Run =====
 if __name__ == "__main__":
