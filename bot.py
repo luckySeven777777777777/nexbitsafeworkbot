@@ -52,12 +52,19 @@ activity_timeout = {}
 # ===== Keyboard =====
 def main_keyboard():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
+
+    # 最上面：上下班
+    kb.row("🏢 Check In", "🏠 Check Out")
+
+    # 日常操作
     kb.row("🍽 Eat", "🚬 Smoking")
     kb.row("💧 Pee", "🚽 Toilet")
-    kb.row("📝 Other")
-    kb.row("🏢 Check In", "🏠 Check Out")
-    kb.row("↩ Return")
+
+    # 放在一起：Other + Return
+    kb.row("📝 Other", "↩ Return")
+
     return kb
+
 
 # ===== Stats =====
 def stats_text(uid):
@@ -154,13 +161,20 @@ def check_out(uid, name):
     end = now()
     diff = end - start
 
-    total_minutes = int(diff.total_seconds() // 60)
-    hours = total_minutes // 60
-    minutes = total_minutes % 60
+    total_seconds = int(diff.total_seconds())
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    seconds = total_seconds % 60
+
+    # 👉 这里可以自定义员工显示名
+    display_name = f"{name}+{uid}【QQwin-39】"
 
     send_group(
-        f"🏠 {name} checked out\n"
-        f"Work duration: {hours} hour : {minutes} min"
+        f"👤 {display_name}\n"
+        f"✅ Checked out successfully\n"
+        f"📅 Check-in time: {start.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"📅 Check-out time: {end.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"⏰ Work duration: {hours}h {minutes}m {seconds}s"
     )
 
     del CHECK_IN_STATUS[uid]
