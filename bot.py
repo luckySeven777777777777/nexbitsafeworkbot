@@ -39,6 +39,17 @@ MAX_TIMES = {
     "Smoking": 4,
     "Other": 2,
 }
+ACTIVITY_LABELS = {
+    "Eating": "Eat",
+    "ToiletLarge": "Toilet",
+    "ToiletSmall": "Pee",
+    "Smoking": "Smoking",
+    "Other": "Other",
+}
+def ordinal(n):
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1:'st', 2:'nd', 3:'rd'}.get(n % 10, 'th') }"
 
 # ===== Memory =====
 user_activity = {}
@@ -118,7 +129,7 @@ def start_activity(uid, name, act):
         return
 
     if user_sessions[uid][act] >= MAX_TIMES[act]:
-        bot.send_message(uid, f"❌ {act} limit reached.")
+        bot.send_message(uid, f"❌ {ACTIVITY_LABELS[act]} limit reached.")
         return
 
     start_dt = now()
@@ -130,8 +141,25 @@ def start_activity(uid, name, act):
     }
     activity_timeout[uid] = False
 
-    bot.send_message(uid, f"✅ {act} started at {start_dt.strftime('%H:%M:%S')}")
-    send_group(f"📢 {name} started {act} at {start_dt.strftime('%H:%M:%S')}")
+    # ===== 计算剩余次数 =====
+    used = user_sessions[uid][act]
+    max_times = MAX_TIMES[act]
+    remaining = max_times - used
+
+    display_name = f"{uid}+{name} 【39-QQwin】"
+    activity_name = ACTIVITY_LABELS[act]
+
+    # ===== 发送 ERA 风格群提示 =====
+    send_group(
+        f"👤 {display_name}\n"
+        f"📅 Time: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"✅ Activity: {activity_name}\n"
+        f"⚠️ This is your {ordinal(used)} {activity_name}, "
+        f"remaining {activity_name} times this shift: {remaining}\n\n"
+        f"👇 Please click [Return] after finishing the activity"
+    )
+
+    bot.send_message(uid, f"✅ {activity_name} started")
 
     def countdown():
         if uid not in user_activity:
@@ -139,7 +167,7 @@ def start_activity(uid, name, act):
         elapsed = (now() - start_dt).total_seconds() / 60
         if elapsed >= ACTIVITY_TIMES[act]:
             activity_timeout[uid] = True
-            send_group(f"⏰ {name} {act} TIMEOUT ⚠️")
+            send_group(f"⏰ {display_name} {activity_name} TIMEOUT ⚠️")
             return
         threading.Timer(60, countdown).start()
 
@@ -167,7 +195,7 @@ def check_out(uid, name):
     seconds = total_seconds % 60
 
     # 👉 这里可以自定义员工显示名
-    display_name = f"{name}+{uid}【QQwin-39】"
+    display_name = f"{name}+{uid}【Nexbit-Safe】"
 
     send_group(
         f"👤 {display_name}\n"
