@@ -138,8 +138,13 @@ def start_activity(uid, name, act):
         reply_markup=main_keyboard()
     )
 
-    # 👉 群提示
-    send_group(f"📢 {name} started {act} at {start_dt.strftime('%H:%M:%S')}")
+# 👉 群提示 + 下发 Return 键盘
+bot.send_message(
+    GROUP_CHAT_ID,
+    f"📢 {name} started {act} at {start_dt.strftime('%H:%M:%S')}\n👇 点击回座",
+    reply_markup=main_keyboard()
+)
+
 
     # 👉 超时检测
     def countdown():
