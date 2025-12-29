@@ -228,7 +228,20 @@ def check_in(uid, name):
         return
 
     CHECK_IN_STATUS[uid] = now()
-    send_group(f"✅ {name} checked in at {CHECK_IN_STATUS[uid].strftime('%H:%M:%S')}")
+    check_time = CHECK_IN_STATUS[uid].strftime('%H:%M:%S')
+
+    # ✅ 群提示（保持你原来的）
+    send_group(f"✅ {name} checked in at {check_time}")
+
+    # ✅ 私聊状态更新（关键新增）
+    safe_pm(
+        uid,
+        f"✅ Registered\n"
+        f"🟢 Already at work：{check_time}\n\n"
+        + stats_text(uid),
+        reply_markup=main_keyboard()
+    )
+
 def check_out(uid, name):
     if uid not in CHECK_IN_STATUS:
         safe_pm(uid, "❌ You must check in first.")
