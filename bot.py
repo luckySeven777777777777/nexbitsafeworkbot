@@ -105,6 +105,13 @@ def send_group(msg):
     except Exception as e:
         print("❌ send_group failed:", e)
 
+def safe_pm(uid, text, reply_markup=None):
+    try:
+        bot.send_message(uid, text, reply_markup=reply_markup)
+        return True
+    except Exception as e:
+        print(f"⚠️ PM failed for {uid}: {e}")
+        return False
 
 # ===== /start =====
 @bot.message_handler(commands=["start"])
@@ -127,7 +134,7 @@ def start(message):
 
         bot.send_message(
             message.chat.id,
-            "✅ 注册成功，以后无需再次点击 /start\n\n"
+            "✅ Registration successful. No need to click again in the future. /start\n\n"
             + stats_text(uid),
             reply_markup=main_keyboard()
         )
@@ -162,15 +169,15 @@ def start_activity(uid, name, act):
 
     # ===== 下面保持你原来的逻辑 =====
     if uid in user_activity:
-        bot.send_message(uid, "❌ Please finish your current activity first.")
+        safe_pm(uid, "❌ Please finish your current activity first.")
         return
 
     if uid not in CHECK_IN_STATUS:
-        bot.send_message(uid, "❌ Please check in first.")
+        safe_pm(uid, "❌ Please check in first.")
         return
 
     if user_sessions[uid][act] >= MAX_TIMES[act]:
-        bot.send_message(uid, f"❌ {ACTIVITY_LABELS[act]} limit reached.")
+        safe_pm(uid, f"❌ {ACTIVITY_LABELS[act]} limit reached.")
         return
 
 
@@ -201,7 +208,7 @@ def start_activity(uid, name, act):
         f"👇 Please click [Return] after finishing the activity"
     )
 
-    bot.send_message(uid, f"✅ {activity_name} started")
+    safe_pm(uid, f"✅ {activity_name} started")
 
     def countdown():
         if uid not in user_activity:
@@ -217,14 +224,14 @@ def start_activity(uid, name, act):
 # ===== Check In / Out =====
 def check_in(uid, name):
     if uid in CHECK_IN_STATUS:
-        bot.send_message(uid, "❌ You are already checked in.")
+        safe_pm(uid, "❌ You are already checked in.")
         return
 
     CHECK_IN_STATUS[uid] = now()
     send_group(f"✅ {name} checked in at {CHECK_IN_STATUS[uid].strftime('%H:%M:%S')}")
 def check_out(uid, name):
     if uid not in CHECK_IN_STATUS:
-        bot.send_message(uid, "❌ You must check in first.")
+        safe_pm(uid, "❌ You must check in first.")
         return
 
     start = CHECK_IN_STATUS[uid]
@@ -276,7 +283,7 @@ def back(message):
 
     user_logs.setdefault(uid, []).append(log)
 
-    bot.send_message(uid, "✅ Returned\n" + stats_text(uid))
+    safe_pm(uid, "✅ Returned\n" + stats_text(uid))
 
     send_group(
         f"👤 {name}\n"
