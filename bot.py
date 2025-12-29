@@ -14,8 +14,9 @@ def now():
     return datetime.now(LOCAL_TZ)
 # ===== Load env =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-GROUP_CHAT_ID = os.getenv("GROUP_CHAT_ID")
-ADMIN_ID = os.getenv("ADMIN_ID")
+GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID")) if os.getenv("GROUP_CHAT_ID") else None
+ADMIN_ID = int(os.getenv("ADMIN_ID")) if os.getenv("ADMIN_ID") else None
+
 
 if not BOT_TOKEN:
     raise Exception("❌ BOT_TOKEN is not set")
@@ -56,6 +57,9 @@ user_activity = {}
 user_sessions = {}
 CHECK_IN_STATUS = {}
 
+# ✅【新增】永久注册用户
+REGISTERED_USERS = set()
+
 # ===== ERA Style Logs (NEW) =====
 user_logs = {}
 activity_timeout = {}
@@ -94,32 +98,69 @@ def stats_text(uid):
 
 # ===== Send group =====
 def send_group(msg):
-    if GROUP_CHAT_ID:
+    if not GROUP_CHAT_ID:
+        return
+    try:
         bot.send_message(GROUP_CHAT_ID, msg)
+    except Exception as e:
+        print("❌ send_group failed:", e)
+
 
 # ===== /start =====
 @bot.message_handler(commands=["start"])
 def start(message):
     uid = message.from_user.id
-    if uid not in user_sessions:
-        user_sessions[uid] = {
+    name = message.from_user.first_name
+
+    # ✅ 第一次注册
+    if uid not in REGISTERED_USERS:
+        REGISTERED_USERS.add(uid)
+
+        user_sessions.setdefault(uid, {
             "Eating": 0,
             "ToiletLarge": 0,
             "ToiletSmall": 0,
             "Smoking": 0,
             "Other": 0,
-        }
-    if uid not in user_logs:
-        user_logs[uid] = []
+        })
+        user_logs.setdefault(uid, [])
 
-    bot.send_message(
-        message.chat.id,
-        "✅ Panel activated\n\n" + stats_text(uid),
-        reply_markup=main_keyboard()
-    )
+        bot.send_message(
+            message.chat.id,
+            "✅ 注册成功，以后无需再次点击 /start\n\n"
+            + stats_text(uid),
+            reply_markup=main_keyboard()
+        )
+    else:
+        # ✅ 已注册，只提示 + 显示上班状态
+        status = (
+            f"🟢 已上班：{CHECK_IN_STATUS[uid].strftime('%H:%M:%S')}"
+            if uid in CHECK_IN_STATUS else "🔴 未上班"
+        )
+
+        bot.send_message(
+            message.chat.id,
+            f"✅ 已注册\n{status}\n\n" + stats_text(uid),
+            reply_markup=main_keyboard()
+        )
+
 
 # ===== Start Activity =====
 def start_activity(uid, name, act):
+    # ✅ 没点 /start 也能正常用（关键）
+    if uid not in REGISTERED_USERS:
+        REGISTERED_USERS.add(uid)
+
+    user_sessions.setdefault(uid, {
+        "Eating": 0,
+        "ToiletLarge": 0,
+        "ToiletSmall": 0,
+        "Smoking": 0,
+        "Other": 0,
+    })
+    user_logs.setdefault(uid, [])
+
+    # ===== 下面保持你原来的逻辑 =====
     if uid in user_activity:
         bot.send_message(uid, "❌ Please finish your current activity first.")
         return
@@ -131,6 +172,7 @@ def start_activity(uid, name, act):
     if user_sessions[uid][act] >= MAX_TIMES[act]:
         bot.send_message(uid, f"❌ {ACTIVITY_LABELS[act]} limit reached.")
         return
+
 
     start_dt = now()
     user_sessions[uid][act] += 1
@@ -146,7 +188,7 @@ def start_activity(uid, name, act):
     max_times = MAX_TIMES[act]
     remaining = max_times - used
 
-    display_name = f"{uid}+{name} 【39-QQwin】"
+    display_name = f"{uid}+{name} 【Nexbit-Safe】"
     activity_name = ACTIVITY_LABELS[act]
 
     # ===== 发送 ERA 风格群提示 =====
