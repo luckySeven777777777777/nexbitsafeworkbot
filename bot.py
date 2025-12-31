@@ -21,7 +21,7 @@ ADMIN_ID = int(os.getenv("ADMIN_ID")) if os.getenv("ADMIN_ID") else None
 if not BOT_TOKEN:
     raise Exception("❌ BOT_TOKEN is not set")
 
-bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
+bot = telebot.TeleBot(BOT_TOKEN)
 
 
 # ===== Config =====
@@ -267,110 +267,83 @@ def check_out(uid, name):
         f"⏰ Work duration: {hours}h {minutes}m {seconds}s"
     )
 
-    CHECK_IN_STATUS.pop(uid, None)
-    user_activity.pop(uid, None)
-    activity_timeout.pop(uid, None)
-
+    del CHECK_IN_STATUS[uid]
 
 # ===== Return =====
-@bot.message_handler(func=lambda m: m.text and "Return" in m.text)
+@bot.message_handler(func=lambda m: "Return" in m.text)
 def back(message):
-    try:
-        uid = message.from_user.id
-        name = message.from_user.first_name or "User"
+    uid = message.from_user.id
+    name = message.from_user.first_name
 
-        # ✅ 没有进行中的活动，也给反馈（不再静默）
-        if uid not in user_activity:
-            safe_pm(uid, "⚠️ No active activity to return.")
-            return
+    if uid not in user_activity:
+        return
 
-        act = user_activity[uid].get("act")
-        start_dt = user_activity[uid].get("start_dt")
-        end_dt = now()
+    act = user_activity[uid]["act"]
+    start_dt = user_activity[uid]["start_dt"]
+    end_dt = now()
 
-        if not act or not start_dt:
-            safe_pm(uid, "⚠️ Activity data error, please try again.")
-            user_activity.pop(uid, None)
-            activity_timeout.pop(uid, None)
-            return
+    duration = end_dt - start_dt
+    timeout_flag = activity_timeout.get(uid, False)
 
-        duration = end_dt - start_dt
-        timeout_flag = activity_timeout.get(uid, False)
 
-        log = {
-            "act": act,
-            "start": start_dt.strftime("%H:%M:%S"),
-            "end": end_dt.strftime("%H:%M:%S"),
-            "duration": f"{int(duration.total_seconds()//60):02d}:{int(duration.total_seconds()%60):02d}",
-            "timeout": timeout_flag
-        }
+    log = {
+        "act": act,
+        "start": start_dt.strftime("%H:%M:%S"),
+        "end": end_dt.strftime("%H:%M:%S"),
+        "duration": f"{int(duration.total_seconds()//60):02d}:{int(duration.total_seconds()%60):02d}",
+        "timeout": timeout_flag
+    }
 
-        user_logs.setdefault(uid, []).append(log)
+    user_logs.setdefault(uid, []).append(log)
 
-        # ✅ 私聊一定有回应
-        safe_pm(uid, "✅ Returned\n" + stats_text(uid))
+    safe_pm(uid, "✅ Returned\n" + stats_text(uid))
 
-        # ✅ 群通知（异常也不影响私聊）
-        send_group(
-            f"👤 {name}\n"
-            f"↩ Returned\n"
-            f"{act}\n"
-            f"Start: {log['start']}\n"
-            f"End: {log['end']}\n"
-            f"Duration: {log['duration']}{' ⚠️' if timeout_flag else ''}"
-        )
+    send_group(
+        f"👤 {name}\n"
+        f"🍽 {user_sessions[uid]['Eating']} / {MAX_TIMES['Eating']}  "
+        f"💧 {user_sessions[uid]['ToiletSmall']} / {MAX_TIMES['ToiletSmall']}  "
+        f"🚽 {user_sessions[uid]['ToiletLarge']} / {MAX_TIMES['ToiletLarge']}  "
+        f"🚬 Smoking: {user_sessions[uid]['Smoking']} / {MAX_TIMES['Smoking']} "
+        f"📝 {user_sessions[uid]['Other']} / {MAX_TIMES['Other']}\n\n"
+        f"↩ Returned\n"
+        f"{act}\n"
+        f"Start: {log['start']}\n"
+        f"End: {log['end']}\n"
+        f"Duration: {log['duration']}{' ⚠️' if timeout_flag else ''}"
+    )
 
-        # ✅ 清理状态（用 pop 防止 KeyError）
-        user_activity.pop(uid, None)
-        activity_timeout.pop(uid, None)
-
-    except Exception as e:
-        print("❌ Return handler error:", e)
-        safe_pm(message.from_user.id, "⚠️ System busy, please click Return again.")
+    del user_activity[uid]
+    del activity_timeout[uid]
 
 # ===== Button handler =====
-@bot.message_handler(func=lambda m: m.text and "Return" not in m.text)
+@bot.message_handler(func=lambda m: True)
 def handler(message):
-    try:
-        uid = message.from_user.id
-        name = message.from_user.first_name or "User"
-        txt = message.text or ""
+    uid = message.from_user.id
+    name = message.from_user.first_name
+    txt = message.text
 
-        if "Eat" in txt:
-            start_activity(uid, name, "Eating")
-        elif "Smoking" in txt:
-            start_activity(uid, name, "Smoking")
-        elif "Pee" in txt:
-            start_activity(uid, name, "ToiletSmall")
-        elif "Toilet" in txt:
-            start_activity(uid, name, "ToiletLarge")
-        elif "Other" in txt:
-            start_activity(uid, name, "Other")
-        elif "Check In" in txt:
-            check_in(uid, name)
-        elif "Check Out" in txt:
-            check_out(uid, name)
-
-    except Exception as e:
-        print("❌ handler error:", e)
-        try:
-            bot.send_message(
-                message.chat.id,
-                "⚠️ System busy, please click again."
-            )
-        except:
-            pass
-
+    if "Eat" in txt:
+        start_activity(uid, name, "Eating")
+    elif "Smoking" in txt:
+        start_activity(uid, name, "Smoking")
+    elif "Pee" in txt:
+        start_activity(uid, name, "ToiletSmall")
+    elif "Toilet" in txt:
+        start_activity(uid, name, "ToiletLarge")
+    elif "Other" in txt:
+        start_activity(uid, name, "Other")
+    elif "Check In" in txt:
+        check_in(uid, name)
+    elif "Check Out" in txt:
+        check_out(uid, name)
 
 
 # ===== Run =====
 if __name__ == "__main__":
     print("🤖 Bot started")
     bot.infinity_polling(
-    skip_pending=True,
-    timeout=30,
-    long_polling_timeout=30,
-    allowed_updates=["message"]
-)
-
+        skip_pending=True,
+        timeout=20,
+        long_polling_timeout=20
+    )
 
