@@ -4,6 +4,14 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import telebot
 from telebot.types import ReplyKeyboardMarkup
+from collections import defaultdict
+
+ATTENDANCE = defaultdict(lambda: defaultdict(dict))
+# 结构：
+# ATTENDANCE[uid][YYYY-MM][YYYY-MM-DD] = {
+#   "checkin": datetime or None,
+#   "checkout": datetime or None
+# }
 
 # ===== Timezone =====
 LOCAL_TZ = ZoneInfo("Asia/Yangon")  # 缅甸
@@ -95,6 +103,42 @@ def stats_text(uid):
         f"🚬 Smoking: {s['Smoking']} / {MAX_TIMES['Smoking']} TIME\n"
         f"📝 Other: {s['Other']} / {MAX_TIMES['Other']} TIME\n"
     )
+
+def build_month_report(uid, now_dt):
+    month_key = now_dt.strftime("%Y-%m")
+    records = ATTENDANCE.get(uid, {}).get(month_key, {})
+
+    worked_days = 0
+    miss_checkin = []
+    miss_checkout = []
+
+    for date in sorted(records.keys()):
+        rec = records[date]
+
+        ci = rec.get("checkin")
+        co = rec.get("checkout")
+
+        if ci and co:
+            worked_days += 1
+        elif co and not ci:
+            miss_checkin.append(
+                f"- {date} {co.strftime('%Y-%m-%d %H:%M:%S')} 未打卡上班"
+            )
+        elif ci and not co:
+            miss_checkout.append(
+                f"- {date} {ci.strftime('%Y-%m-%d %H:%M:%S')} 未打卡下班"
+            )
+
+    text = "\n📊 本月统计：\n"
+    text += f"🗓️ 已正常上班天数：{worked_days} 天\n"
+
+    if miss_checkin:
+        text += "⚠️ 未打卡上班记录：\n" + "\n".join(miss_checkin) + "\n"
+
+    if miss_checkout:
+        text += "⚠️ 未打卡下班记录：\n" + "\n".join(miss_checkout) + "\n"
+
+    return text
 
 # ===== Send group =====
 def send_group(msg):
@@ -232,6 +276,13 @@ def check_in(uid, name):
 
     # ✅ 群提示（保持你原来的）
     send_group(f"✅ {name} checked in at {check_time}")
+    # ===== ✅【新增】记录上班打卡（唯一位置）=====
+    now_dt = CHECK_IN_STATUS[uid]
+    month_key = now_dt.strftime("%Y-%m")
+    date_key = now_dt.strftime("%Y-%m-%d")
+
+    ATTENDANCE[uid][month_key].setdefault(date_key, {})
+    ATTENDANCE[uid][month_key][date_key]["checkin"] = now_dt
 
     # ✅ 私聊状态更新（关键新增）
     safe_pm(
@@ -256,16 +307,27 @@ def check_out(uid, name):
     minutes = (total_seconds % 3600) // 60
     seconds = total_seconds % 60
 
-    # 👉 这里可以自定义员工显示名
+        # 👉 这里可以自定义员工显示名
     display_name = f"{name}+{uid}【Nexbit-Safe】"
 
+
+    # ===== ✅【新增】记录下班打卡 =====
+    now_dt = end
+    month_key = now_dt.strftime("%Y-%m")
+    date_key = now_dt.strftime("%Y-%m-%d")
+
+    ATTENDANCE[uid][month_key].setdefault(date_key, {})
+    ATTENDANCE[uid][month_key][date_key]["checkout"] = now_dt
+
     send_group(
-        f"👤 {display_name}\n"
-        f"✅ Checked out successfully\n"
-        f"📅 Check-in time: {start.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"📅 Check-out time: {end.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"⏰ Work duration: {hours}h {minutes}m {seconds}s"
-    )
+    f"👤 {display_name}\n"
+    f"✅ Checked out successfully\n"
+    f"📅 Check-in time: {start.strftime('%Y-%m-%d %H:%M:%S')}\n"
+    f"📅 Check-out time: {end.strftime('%Y-%m-%d %H:%M:%S')}\n"
+    f"⏰ Work duration: {hours}h {minutes}m {seconds}s"
+    + build_month_report(uid, end)
+)
+
 
     del CHECK_IN_STATUS[uid]
 
