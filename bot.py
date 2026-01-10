@@ -398,14 +398,83 @@ def handler(message):
         check_in(uid, name)
     elif "Check Out" in txt:
         check_out(uid, name)
+import re
+
+# ===== 新增：导入群历史打卡 =====
+def import_history_from_group(group_id, limit=1000):
+    """
+    从群消息抓历史打卡记录，导入 ATTENDANCE
+    limit: 读取最近多少条消息
+    """
+    if not group_id:
+        print("⚠️ GROUP_CHAT_ID 未设置，无法导入历史记录")
+        return
+
+    print(f"⏳ Importing last {limit} messages from group {group_id}...")
+
+    try:
+        messages = bot.get_chat_history(group_id, limit=limit)
+    except Exception as e:
+        print("❌ Failed to get chat history:", e)
+        return
+
+    # 名字 -> UID 映射，如果 bot 发送消息没有 UID，可以手动维护
+    NAME_TO_UID = {}  # 例如 {"Alice": 123456789, "Bob": 987654321}
+
+    for msg in messages:
+        text = msg.text
+        if not text:
+            continue
+
+        # ==== 上班打卡 ====
+        m_checkin = re.match(r"✅ (.+?) checked in at (\d{2}:\d{2}:\d{2})", text)
+        if m_checkin:
+            name = m_checkin.group(1)
+            time_str = m_checkin.group(2)
+            uid = name  # 用名字代替 UID
+
+            date = msg.date.astimezone(LOCAL_TZ)
+            month_key = date.strftime("%Y-%m")
+            date_key = date.strftime("%Y-%m-%d")
+
+            ATTENDANCE[uid][month_key].setdefault(date_key, {})
+            ATTENDANCE[uid][month_key][date_key]["checkin"] = datetime(
+                date.year, date.month, date.day,
+                int(time_str[:2]), int(time_str[3:5]), int(time_str[6:8]),
+                tzinfo=LOCAL_TZ
+            )
+            continue
+
+        # ==== 下班打卡 ====
+        if "✅ Checked out successfully" in text:
+            m_start = re.search(r"📅 Check-in time: (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", text)
+            m_end   = re.search(r"📅 Check-out time: (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", text)
+            if m_start and m_end:
+                start_dt = datetime.fromisoformat(m_start.group(1)).replace(tzinfo=LOCAL_TZ)
+                end_dt   = datetime.fromisoformat(m_end.group(1)).replace(tzinfo=LOCAL_TZ)
+                uid = msg.from_user.id  # 如果 bot 发的消息没有 UID，需要手动 NAME_TO_UID
+
+                month_key = end_dt.strftime("%Y-%m")
+                date_key = end_dt.strftime("%Y-%m-%d")
+
+                ATTENDANCE[uid][month_key].setdefault(date_key, {})
+                ATTENDANCE[uid][month_key][date_key]["checkin"] = start_dt
+                ATTENDANCE[uid][month_key][date_key]["checkout"] = end_dt
+
+    print("✅ History imported from group successfully")
 
 
 # ===== Run =====
 if __name__ == "__main__":
+    # ✅ 导入历史打卡记录
+    if GROUP_CHAT_ID:
+        import_history_from_group(GROUP_CHAT_ID, limit=1000)
+
     print("🤖 Bot started")
     bot.infinity_polling(
         skip_pending=True,
         timeout=20,
         long_polling_timeout=20
     )
+
 
