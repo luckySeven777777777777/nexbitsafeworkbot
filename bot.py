@@ -1,12 +1,47 @@
+import sqlite3
+
+DB_FILE = "/data/attendance.db"
+
+
+def get_db():
+    return sqlite3.connect(DB_FILE, check_same_thread=False)
+
+def init_db():
+    with get_db() as conn:
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS attendance (
+            uid INTEGER,
+            work_date TEXT,
+            role TEXT,
+            shift TEXT,
+            checkin TEXT,
+            checkout TEXT,
+            PRIMARY KEY (uid, work_date, shift)
+        )
+        """)
+
 import os
 import threading
-from datetime import datetime
+import sqlite3
+import re
+
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
+from collections import defaultdict
+
 import telebot
 from telebot.types import ReplyKeyboardMarkup
+
 from collections import defaultdict
 
 ATTENDANCE = defaultdict(lambda: defaultdict(dict))
+# （以后这个可以慢慢不用，但现在保留不冲突）
+
+LOCAL_TZ = ZoneInfo("Asia/Yangon")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID")) if os.getenv("GROUP_CHAT_ID") else None
+ADMIN_ID = int(os.getenv("ADMIN_ID")) if os.getenv("ADMIN_ID") else None
+
 # 结构：
 # ATTENDANCE[uid][YYYY-MM][YYYY-MM-DD] = {
 #   "checkin": datetime or None,
@@ -40,6 +75,9 @@ ACTIVITY_TIMES = {
     "Smoking": 10,
     "Other": 15,
 }
+# ===== User Role =====
+HR_USERS = {6725112018, 6478034136}   # 人事部 UID（你填）
+PROMOTION_USERS = set()            # 推广用户（默认）
 
 MAX_TIMES = {
     "Eating": 3,
@@ -104,41 +142,108 @@ def stats_text(uid):
         f"📝 Other: {s['Other']} / {MAX_TIMES['Other']} TIME\n"
     )
 
+from datetime import time, timedelta
+
+# ===== Shift Time Config =====
+
+# HR（人事部：单班）
+HR_START = time(9, 0)
+HR_END   = time(19, 0)
+
+# Promotion（推广：双班）
+NIGHT_START = time(19, 0)
+NIGHT_END   = time(23, 59)
+
+MORNING_START = time(6, 0)
+MORNING_END   = time(12, 0)
+
+
+def get_user_role(uid):
+    if uid in HR_USERS:
+        return "HR"
+    if uid in PROMOTION_USERS:
+        return "PROMOTION"
+    return "PROMOTION"
+
+
+
+def get_shift_by_role(uid, dt):
+    t = dt.time()
+    role = get_user_role(uid)
+
+    # ===== HR：单班 =====
+    if role == "HR":
+        if HR_START <= t <= HR_END:
+            return "full", dt.date()
+        return None, None
+
+    # ===== PROMOTION：双班 =====
+    # 晚班（当天）
+    if NIGHT_START <= t <= NIGHT_END:
+        return "night", dt.date()
+
+    # 早班（当天）
+    if MORNING_START <= t <= MORNING_END:
+        return "morning", dt.date()
+
+    return None, None
+
+
+
+# ✅ 一定要在 build_month_report 之前
+def calc_total_worked_days(uid):
+    total = 0
+    role = get_user_role(uid)
+
+    for month_data in ATTENDANCE.get(uid, {}).values():
+        for rec in month_data.values():
+
+            if role == "HR":
+                full = rec.get("full", {})
+                if full.get("checkin") and full.get("checkout"):
+                    total += 1
+            else:
+                night = rec.get("night", {})
+                morning = rec.get("morning", {})
+                if (
+                    night.get("checkin") and night.get("checkout")
+                    and
+                    morning.get("checkin") and morning.get("checkout")
+                ):
+                    total += 1
+
+    return total
+
+
+
 def build_month_report(uid, now_dt):
     month_key = now_dt.strftime("%Y-%m")
     records = ATTENDANCE.get(uid, {}).get(month_key, {})
+    role = get_user_role(uid)
 
     worked_days = 0
-    miss_checkin = []
-    miss_checkout = []
 
-    for date in sorted(records.keys()):
-        rec = records[date]
+    for rec in records.values():
+        if role == "HR":
+            full = rec.get("full", {})
+            if full.get("checkin") and full.get("checkout"):
+                worked_days += 1
+        else:
+            night = rec.get("night", {})
+            morning = rec.get("morning", {})
+            if (
+                night.get("checkin") and night.get("checkout")
+                and
+                morning.get("checkin") and morning.get("checkout")
+            ):
+                worked_days += 1
 
-        ci = rec.get("checkin")
-        co = rec.get("checkout")
+    return (
+        "\n📊 本月统计：\n"
+        f"🗓️ 本月已正常上班：{worked_days} 天\n"
+        f"📊 累计正常上班：{calc_total_worked_days(uid)} 天\n"
+    )
 
-        if ci and co:
-            worked_days += 1
-        elif co and not ci:
-            miss_checkin.append(
-                f"- {date} {co.strftime('%Y-%m-%d %H:%M:%S')} 未打卡上班"
-            )
-        elif ci and not co:
-            miss_checkout.append(
-                f"- {date} {ci.strftime('%Y-%m-%d %H:%M:%S')} 未打卡下班"
-            )
-
-    text = "\n📊 本月统计：\n"
-    text += f"🗓️ 已正常上班天数：{worked_days} 天\n"
-
-    if miss_checkin:
-        text += "⚠️ 未打卡上班记录：\n" + "\n".join(miss_checkin) + "\n"
-
-    if miss_checkout:
-        text += "⚠️ 未打卡下班记录：\n" + "\n".join(miss_checkout) + "\n"
-
-    return text
 
 # ===== Send group =====
 def send_group(msg):
@@ -272,17 +377,22 @@ def check_in(uid, name):
         return
 
     CHECK_IN_STATUS[uid] = now()
-    check_time = CHECK_IN_STATUS[uid].strftime('%H:%M:%S')
-
-    # ✅ 群提示（保持你原来的）
-    send_group(f"✅ {name} checked in at {check_time}")
-    # ===== ✅【新增】记录上班打卡（唯一位置）=====
     now_dt = CHECK_IN_STATUS[uid]
-    month_key = now_dt.strftime("%Y-%m")
-    date_key = now_dt.strftime("%Y-%m-%d")
+
+    shift, work_date = get_shift_by_role(uid, now_dt)
+    if not shift:
+        safe_pm(uid, "❌ 当前时间不在你的上班时间范围内")
+        del CHECK_IN_STATUS[uid]
+        return
+
+    month_key = work_date.strftime("%Y-%m")
+    date_key = work_date.strftime("%Y-%m-%d")
 
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
-    ATTENDANCE[uid][month_key][date_key]["checkin"] = now_dt
+    ATTENDANCE[uid][month_key][date_key].setdefault(shift, {})
+    ATTENDANCE[uid][month_key][date_key][shift]["checkin"] = now_dt
+
+
 
     # ✅ 私聊状态更新（关键新增）
     safe_pm(
@@ -307,29 +417,35 @@ def check_out(uid, name):
     minutes = (total_seconds % 3600) // 60
     seconds = total_seconds % 60
 
-        # 👉 这里可以自定义员工显示名
     display_name = f"{name}+{uid}【Nexbit-Safe】"
 
+    # ===== 关键：按角色 & 时间判断班次 =====
+    shift, work_date = get_shift_by_role(uid, end)
+    if not shift:
+        safe_pm(uid, "❌ 当前时间不在你的下班时间范围内")
+        return
 
-    # ===== ✅【新增】记录下班打卡 =====
-    now_dt = end
-    month_key = now_dt.strftime("%Y-%m")
-    date_key = now_dt.strftime("%Y-%m-%d")
+    month_key = work_date.strftime("%Y-%m")
+    date_key = work_date.strftime("%Y-%m-%d")
 
+    # ===== 记录下班打卡（内存结构，先不动）=====
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
-    ATTENDANCE[uid][month_key][date_key]["checkout"] = now_dt
+    ATTENDANCE[uid][month_key][date_key].setdefault(shift, {})
+    ATTENDANCE[uid][month_key][date_key][shift]["checkout"] = end
 
+    # ===== 群提示 =====
     send_group(
-    f"👤 {display_name}\n"
-    f"✅ Checked out successfully\n"
-    f"📅 Check-in time: {start.strftime('%Y-%m-%d %H:%M:%S')}\n"
-    f"📅 Check-out time: {end.strftime('%Y-%m-%d %H:%M:%S')}\n"
-    f"⏰ Work duration: {hours}h {minutes}m {seconds}s"
-    + build_month_report(uid, end)
-)
+        f"👤 {display_name}\n"
+        f"✅ Checked out successfully\n"
+        f"📅 Check-in time: {start.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"📅 Check-out time: {end.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"⏰ Work duration: {hours}h {minutes}m {seconds}s"
+        + build_month_report(uid, end)
+    )
 
-
+    # ===== 清除上班状态 =====
     del CHECK_IN_STATUS[uid]
+
 
 # ===== Return =====
 @bot.message_handler(func=lambda m: "Return" in m.text)
@@ -466,15 +582,13 @@ def import_history_from_group(group_id, limit=1000):
 
 # ===== Run =====
 if __name__ == "__main__":
-    # ✅ 导入历史打卡记录
-    if GROUP_CHAT_ID:
-        import_history_from_group(GROUP_CHAT_ID, limit=1000)
-
+    init_db()   # ⭐⭐⭐ 关键
     print("🤖 Bot started")
     bot.infinity_polling(
         skip_pending=True,
         timeout=20,
         long_polling_timeout=20
     )
+
 
 
