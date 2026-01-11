@@ -1,3 +1,7 @@
+import json
+
+DATA_FILE = "attendance.json"
+
 import os
 import threading
 from datetime import datetime
@@ -7,6 +11,49 @@ from telebot.types import ReplyKeyboardMarkup
 from collections import defaultdict
 
 ATTENDANCE = defaultdict(lambda: defaultdict(dict))
+def load_attendance():
+    global ATTENDANCE
+    if not os.path.exists(DATA_FILE):
+        print("📂 attendance.json not found, starting fresh")
+        return
+
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+
+        for uid, months in raw.items():
+            uid = int(uid)
+            for month, days in months.items():
+                for day, rec in days.items():
+                    ATTENDANCE[uid][month][day] = {}
+                    if rec.get("checkin"):
+                        ATTENDANCE[uid][month][day]["checkin"] = datetime.fromisoformat(rec["checkin"])
+                    if rec.get("checkout"):
+                        ATTENDANCE[uid][month][day]["checkout"] = datetime.fromisoformat(rec["checkout"])
+
+        print("✅ Attendance loaded from JSON")
+
+    except Exception as e:
+        print("❌ Failed to load attendance.json:", e)
+def save_attendance():
+    data = {}
+
+    for uid, months in ATTENDANCE.items():
+        data[str(uid)] = {}
+        for month, days in months.items():
+            data[str(uid)][month] = {}
+            for day, rec in days.items():
+                data[str(uid)][month][day] = {
+                    "checkin": rec.get("checkin").isoformat() if rec.get("checkin") else None,
+                    "checkout": rec.get("checkout").isoformat() if rec.get("checkout") else None,
+                }
+
+    try:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("❌ Failed to save attendance.json:", e)
+
 # 结构：
 # ATTENDANCE[uid][YYYY-MM][YYYY-MM-DD] = {
 #   "checkin": datetime or None,
@@ -59,6 +106,12 @@ def ordinal(n):
     if 10 <= n % 100 <= 20:
         return f"{n}th"
     return f"{n}{ {1:'st', 2:'nd', 3:'rd'}.get(n % 10, 'th') }"
+# ===== HR 用户配置（只填 HR 的 Telegram user_id）=====
+HR_USERS = {
+    6725112018,
+    6478034136,
+}
+
 
 # ===== Memory =====
 user_activity = {}
@@ -103,34 +156,95 @@ def stats_text(uid):
         f"🚬 Smoking: {s['Smoking']} / {MAX_TIMES['Smoking']} TIME\n"
         f"📝 Other: {s['Other']} / {MAX_TIMES['Other']} TIME\n"
     )
+from datetime import time
+
+def get_shift(dt, uid):
+    t = dt.time()
+
+    # ===== HR：09:00–19:00 =====
+    if uid in HR_USERS:
+        if time(9, 0) <= t <= time(19, 0):
+            return "HR"
+        return None
+
+    # ===== 推广（默认）=====
+    if time(6, 0) <= t <= time(12, 0):
+        return "PROMO_MORNING"
+    if time(19, 0) <= t <= time(23, 59, 59):
+        return "PROMO_NIGHT"
+
+    return None
+
+
+
+def is_within_same_shift(ci, co, uid):
+    if not ci or not co:
+        return False
+
+    shift = get_shift(ci, uid)
+    if not shift:
+        return False
+
+    ci_t = ci.time()
+    co_t = co.time()
+
+    if shift == "PROMO_MORNING":
+        return time(6, 0) <= ci_t <= time(12, 0) and time(6, 0) <= co_t <= time(12, 0)
+
+    if shift == "HR":
+        return time(9, 0) <= ci_t <= time(19, 0) and time(9, 0) <= co_t <= time(19, 0)
+
+    if shift == "PROMO_NIGHT":
+        return time(19, 0) <= ci_t <= time(23, 59, 59) and time(19, 0) <= co_t <= time(23, 59, 59)
+
+    return False
+
+
 
 def build_month_report(uid, now_dt):
     month_key = now_dt.strftime("%Y-%m")
-    records = ATTENDANCE.get(uid, {}).get(month_key, {})
 
-    worked_days = 0
+    worked_this_month = 0
+    worked_total = 0
+
     miss_checkin = []
     miss_checkout = []
 
-    for date in sorted(records.keys()):
-        rec = records[date]
+    user_records = ATTENDANCE.get(uid, {})
 
-        ci = rec.get("checkin")
-        co = rec.get("checkout")
+    for month, records in user_records.items():
+        for date in sorted(records.keys()):
+            rec = records[date]
 
-        if ci and co:
-            worked_days += 1
-        elif co and not ci:
-            miss_checkin.append(
-                f"- {date} {co.strftime('%Y-%m-%d %H:%M:%S')} 未打卡上班"
-            )
-        elif ci and not co:
-            miss_checkout.append(
-                f"- {date} {ci.strftime('%Y-%m-%d %H:%M:%S')} 未打卡下班"
-            )
+            ci = rec.get("checkin")
+            co = rec.get("checkout")
 
-    text = "\n📊 本月统计：\n"
-    text += f"🗓️ 已正常上班天数：{worked_days} 天\n"
+            # ✅ 正常上下班（同一班次）
+            if ci and co and is_within_same_shift(ci, co, uid):
+                worked_total += 1
+                if month == month_key:
+                    worked_this_month += 1
+                continue
+
+            # ⚠️ 只有下班（班次内）→ 缺上班
+            if co and not ci:
+                if month == month_key and get_shift(co, uid):
+                    miss_checkin.append(
+                        f"- {date} {co.strftime('%Y-%m-%d %H:%M:%S')} 未打卡上班"
+                    )
+                continue
+
+            # ⚠️ 只有上班（班次内）→ 缺下班
+            if ci and not co:
+                if month == month_key and get_shift(ci, uid):
+                    miss_checkout.append(
+                        f"- {date} {ci.strftime('%Y-%m-%d %H:%M:%S')} 未打卡下班"
+                    )
+                continue
+
+    text = "\n📊 考勤统计：\n"
+    text += f"🗓️ 本月已正常上班：{worked_this_month} 天\n"
+    text += f"📊 累计正常上班：{worked_total} 天\n"
 
     if miss_checkin:
         text += "⚠️ 未打卡上班记录：\n" + "\n".join(miss_checkin) + "\n"
@@ -139,6 +253,7 @@ def build_month_report(uid, now_dt):
         text += "⚠️ 未打卡下班记录：\n" + "\n".join(miss_checkout) + "\n"
 
     return text
+
 
 # ===== Send group =====
 def send_group(msg):
@@ -283,6 +398,7 @@ def check_in(uid, name):
 
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
     ATTENDANCE[uid][month_key][date_key]["checkin"] = now_dt
+    save_attendance()
 
     # ✅ 私聊状态更新（关键新增）
     safe_pm(
@@ -307,29 +423,30 @@ def check_out(uid, name):
     minutes = (total_seconds % 3600) // 60
     seconds = total_seconds % 60
 
-        # 👉 这里可以自定义员工显示名
+    # 👉 员工显示名（必须在函数内）
     display_name = f"{name}+{uid}【Nexbit-Safe】"
 
-
-    # ===== ✅【新增】记录下班打卡 =====
+    # ===== 记录下班打卡 =====
     now_dt = end
     month_key = now_dt.strftime("%Y-%m")
     date_key = now_dt.strftime("%Y-%m-%d")
 
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
     ATTENDANCE[uid][month_key][date_key]["checkout"] = now_dt
+    save_attendance()
 
+    # ===== 群消息（完整 & 缩进正确）=====
     send_group(
-    f"👤 {display_name}\n"
-    f"✅ Checked out successfully\n"
-    f"📅 Check-in time: {start.strftime('%Y-%m-%d %H:%M:%S')}\n"
-    f"📅 Check-out time: {end.strftime('%Y-%m-%d %H:%M:%S')}\n"
-    f"⏰ Work duration: {hours}h {minutes}m {seconds}s"
-    + build_month_report(uid, end)
-)
-
+        f"👤 {display_name}\n"
+        f"✅ Checked out successfully\n"
+        f"📅 Check-in time: {start.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"📅 Check-out time: {end.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"⏰ Work duration: {hours}h {minutes}m {seconds}s\n"
+        + build_month_report(uid, end)
+    )
 
     del CHECK_IN_STATUS[uid]
+
 
 # ===== Return =====
 @bot.message_handler(func=lambda m: "Return" in m.text)
@@ -398,83 +515,19 @@ def handler(message):
         check_in(uid, name)
     elif "Check Out" in txt:
         check_out(uid, name)
-import re
-
-# ===== 新增：导入群历史打卡 =====
-def import_history_from_group(group_id, limit=1000):
-    """
-    从群消息抓历史打卡记录，导入 ATTENDANCE
-    limit: 读取最近多少条消息
-    """
-    if not group_id:
-        print("⚠️ GROUP_CHAT_ID 未设置，无法导入历史记录")
-        return
-
-    print(f"⏳ Importing last {limit} messages from group {group_id}...")
-
-    try:
-        messages = bot.get_chat_history(group_id, limit=limit)
-    except Exception as e:
-        print("❌ Failed to get chat history:", e)
-        return
-
-    # 名字 -> UID 映射，如果 bot 发送消息没有 UID，可以手动维护
-    NAME_TO_UID = {}  # 例如 {"Alice": 123456789, "Bob": 987654321}
-
-    for msg in messages:
-        text = msg.text
-        if not text:
-            continue
-
-        # ==== 上班打卡 ====
-        m_checkin = re.match(r"✅ (.+?) checked in at (\d{2}:\d{2}:\d{2})", text)
-        if m_checkin:
-            name = m_checkin.group(1)
-            time_str = m_checkin.group(2)
-            uid = name  # 用名字代替 UID
-
-            date = msg.date.astimezone(LOCAL_TZ)
-            month_key = date.strftime("%Y-%m")
-            date_key = date.strftime("%Y-%m-%d")
-
-            ATTENDANCE[uid][month_key].setdefault(date_key, {})
-            ATTENDANCE[uid][month_key][date_key]["checkin"] = datetime(
-                date.year, date.month, date.day,
-                int(time_str[:2]), int(time_str[3:5]), int(time_str[6:8]),
-                tzinfo=LOCAL_TZ
-            )
-            continue
-
-        # ==== 下班打卡 ====
-        if "✅ Checked out successfully" in text:
-            m_start = re.search(r"📅 Check-in time: (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", text)
-            m_end   = re.search(r"📅 Check-out time: (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", text)
-            if m_start and m_end:
-                start_dt = datetime.fromisoformat(m_start.group(1)).replace(tzinfo=LOCAL_TZ)
-                end_dt   = datetime.fromisoformat(m_end.group(1)).replace(tzinfo=LOCAL_TZ)
-                uid = msg.from_user.id  # 如果 bot 发的消息没有 UID，需要手动 NAME_TO_UID
-
-                month_key = end_dt.strftime("%Y-%m")
-                date_key = end_dt.strftime("%Y-%m-%d")
-
-                ATTENDANCE[uid][month_key].setdefault(date_key, {})
-                ATTENDANCE[uid][month_key][date_key]["checkin"] = start_dt
-                ATTENDANCE[uid][month_key][date_key]["checkout"] = end_dt
-
-    print("✅ History imported from group successfully")
 
 
+ 
 # ===== Run =====
 if __name__ == "__main__":
-    # ✅ 导入历史打卡记录
-    if GROUP_CHAT_ID:
-        import_history_from_group(GROUP_CHAT_ID, limit=1000)
-
-    print("🤖 Bot started")
+    load_attendance()
+    print("🤖 Bot started (JSON persistence)")
     bot.infinity_polling(
         skip_pending=True,
         timeout=20,
         long_polling_timeout=20
     )
+
+
 
 
