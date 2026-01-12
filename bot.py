@@ -624,11 +624,16 @@ def check_out(uid, name):
 
     # ===== 群里（简版）=====
     send_group(
-        f"👤 {name}+{uid}【Nexbit-Safe】\n"
-        f"✅ Checked out\n"
-        f"⏰ {hours}h {minutes}m {seconds}s\n"
-        f"{status_text}"
-    )
+        f"👤 {name}+{uid}【Nexbit-Safe】\n\n"
+        f"✅ Checked out successfully\n"
+        f"📅 Check-in time: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"📅 Check-out time: {end_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"⏰ Work duration: {hours}h {minutes}m {seconds}s\n"
+        f"{status_text}\n\n"
+        f"📊 考勤统计：\n"
+        f"🗓️ 本月已正常上班：{month_days} 天\n"
+        f"📊 累计正常上班：{total_days} 天"
+)
 
     # ===== 清状态（一定要在函数里、最后）=====
     del CHECK_IN_STATUS[uid]
