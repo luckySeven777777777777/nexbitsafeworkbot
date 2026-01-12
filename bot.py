@@ -4,11 +4,12 @@ DATA_FILE = "attendance.json"
 
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 import telebot
 from telebot.types import ReplyKeyboardMarkup
 from collections import defaultdict
+
 
 ATTENDANCE = defaultdict(lambda: defaultdict(dict))
 def load_attendance():
@@ -26,15 +27,23 @@ def load_attendance():
             for month, days in months.items():
                 for day, rec in days.items():
                     ATTENDANCE[uid][month][day] = {}
+
+                    # ===== 上下班时间 =====
                     if rec.get("checkin"):
                         ATTENDANCE[uid][month][day]["checkin"] = datetime.fromisoformat(rec["checkin"])
+
                     if rec.get("checkout"):
                         ATTENDANCE[uid][month][day]["checkout"] = datetime.fromisoformat(rec["checkout"])
+
+                    # ===== ✅【就在这里加】迟到 / 早退 =====
+                    ATTENDANCE[uid][month][day]["late_minutes"] = rec.get("late_minutes", 0)
+                    ATTENDANCE[uid][month][day]["early_leave_minutes"] = rec.get("early_leave_minutes", 0)
 
         print("✅ Attendance loaded from JSON")
 
     except Exception as e:
         print("❌ Failed to load attendance.json:", e)
+
 def save_attendance():
     data = {}
 
@@ -44,9 +53,12 @@ def save_attendance():
             data[str(uid)][month] = {}
             for day, rec in days.items():
                 data[str(uid)][month][day] = {
-                    "checkin": rec.get("checkin").isoformat() if rec.get("checkin") else None,
-                    "checkout": rec.get("checkout").isoformat() if rec.get("checkout") else None,
-                }
+    "checkin": rec.get("checkin").isoformat() if rec.get("checkin") else None,
+    "checkout": rec.get("checkout").isoformat() if rec.get("checkout") else None,
+    "late_minutes": rec.get("late_minutes", 0),
+    "early_leave_minutes": rec.get("early_leave_minutes", 0),
+}
+
 
     try:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -112,6 +124,32 @@ HR_USERS = {
     6478034136,
 }
 
+# ===== FINDING 用户配置（Telegram user_id）=====
+FINDING_USERS = {
+    8525517116,   # finding 员工 1
+    5545647021,
+    5706894394,
+    1791318040,
+    6683820548, 
+    7964956372,
+    8437762768, 
+    5251501400,
+    8547596973,  # finding 员工 2
+}
+SHIFT_RULES = {
+    "HR": {
+        "start": time(9, 0),
+        "end": time(19, 0),
+    },
+    "FINDING": {
+        "morning": (time(7, 0), time(12, 0)),
+        "night": (time(19, 0), time(23, 59, 59)),
+    },
+    "PROMO": {
+        "morning": (time(6, 0), time(12, 0)),
+        "night": (time(19, 0), time(23, 59, 59)),
+    }
+}
 
 # ===== Memory =====
 user_activity = {}
@@ -156,104 +194,114 @@ def stats_text(uid):
         f"🚬 Smoking: {s['Smoking']} / {MAX_TIMES['Smoking']} TIME\n"
         f"📝 Other: {s['Other']} / {MAX_TIMES['Other']} TIME\n"
     )
-from datetime import time
 
-def get_shift(dt, uid):
+
+# ===== Attendance Statistics =====
+def get_attendance_summary(uid):
+    """
+    返回：
+    本月正常上班天数 X
+    累计正常上班天数 Y
+    """
+    if uid not in ATTENDANCE:
+        return 0, 0
+
+    now_dt = now()
+    current_month = now_dt.strftime("%Y-%m")
+
+    total_days = set()
+    month_days = set()
+
+    for month, days in ATTENDANCE[uid].items():
+        for day, rec in days.items():
+            # 只要有 checkin 就算上班一天
+            if rec.get("checkin") and rec.get("checkout"):
+                total_days.add(day)
+                if month == current_month:
+                    month_days.add(day)
+
+    return len(month_days), len(total_days)
+
+
+    if uid not in user_sessions:
+        return "No records"
+
+    s = user_sessions[uid]
+    return (
+        f"👤 User ID: {uid}\n\n"
+        f"🍽 Eat: {s['Eating']} / {MAX_TIMES['Eating']} TIME\n"
+        f"💧 Pee: {s['ToiletSmall']} / {MAX_TIMES['ToiletSmall']} TIME\n"
+        f"🚽 Toilet: {s['ToiletLarge']} / {MAX_TIMES['ToiletLarge']} TIME\n"
+        f"🚬 Smoking: {s['Smoking']} / {MAX_TIMES['Smoking']} TIME\n"
+        f"📝 Other: {s['Other']} / {MAX_TIMES['Other']} TIME\n"
+    )
+
+def get_shift_standard(dt, uid):
     t = dt.time()
 
-    # ===== HR：09:00–19:00 =====
+    # ===== HR =====
     if uid in HR_USERS:
-        if time(9, 0) <= t <= time(19, 0):
-            return "HR"
-        return None
+        return {
+            "role": "HR",
+            "shift": "DAY",
+            "start": time(9, 0),
+            "end": time(19, 0),
+        }
 
-    # ===== 推广（默认）=====
+    # ===== FINDING =====
+    if uid in FINDING_USERS:
+        # 早班
+        if time(7, 0) <= t <= time(12, 0):
+            return {
+                "role": "FINDING",
+                "shift": "MORNING",
+                "start": time(7, 0),
+                "end": time(12, 0),
+            }
+
+        # 晚班（跨天）
+        if t >= time(19, 0) or t < time(6, 0):
+            return {
+                "role": "FINDING",
+                "shift": "NIGHT",
+                "start": time(19, 0),
+                "end": time(6, 0),   # 次日 06:00
+                "cross_day": True
+            }
+
+        # 提前打卡 → 默认早班
+        return {
+            "role": "FINDING",
+            "shift": "MORNING",
+            "start": time(7, 0),
+            "end": time(12, 0),
+        }
+
+    # ===== PROMO =====
     if time(6, 0) <= t <= time(12, 0):
-        return "PROMO_MORNING"
-    if time(19, 0) <= t <= time(23, 59, 59):
-        return "PROMO_NIGHT"
+        return {
+            "role": "PROMO",
+            "shift": "MORNING",
+            "start": time(6, 0),
+            "end": time(12, 0),
+        }
 
-    return None
+    if t >= time(19, 0) or t < time(6, 0):
+        return {
+            "role": "PROMO",
+            "shift": "NIGHT",
+            "start": time(19, 0),
+            "end": time(6, 0),
+            "cross_day": True
+        }
 
-
-
-def is_within_same_shift(ci, co, uid):
-    if not ci or not co:
-        return False
-
-    shift = get_shift(ci, uid)
-    if not shift:
-        return False
-
-    ci_t = ci.time()
-    co_t = co.time()
-
-    if shift == "PROMO_MORNING":
-        return time(6, 0) <= ci_t <= time(12, 0) and time(6, 0) <= co_t <= time(12, 0)
-
-    if shift == "HR":
-        return time(9, 0) <= ci_t <= time(19, 0) and time(9, 0) <= co_t <= time(19, 0)
-
-    if shift == "PROMO_NIGHT":
-        return time(19, 0) <= ci_t <= time(23, 59, 59) and time(19, 0) <= co_t <= time(23, 59, 59)
-
-    return False
-
-
-
-def build_month_report(uid, now_dt):
-    month_key = now_dt.strftime("%Y-%m")
-
-    worked_this_month = 0
-    worked_total = 0
-
-    miss_checkin = []
-    miss_checkout = []
-
-    user_records = ATTENDANCE.get(uid, {})
-
-    for month, records in user_records.items():
-        for date in sorted(records.keys()):
-            rec = records[date]
-
-            ci = rec.get("checkin")
-            co = rec.get("checkout")
-
-            # ✅ 正常上下班（同一班次）
-            if ci and co and is_within_same_shift(ci, co, uid):
-                worked_total += 1
-                if month == month_key:
-                    worked_this_month += 1
-                continue
-
-            # ⚠️ 只有下班（班次内）→ 缺上班
-            if co and not ci:
-                if month == month_key and get_shift(co, uid):
-                    miss_checkin.append(
-                        f"- {date} {co.strftime('%Y-%m-%d %H:%M:%S')} 未打卡上班"
-                    )
-                continue
-
-            # ⚠️ 只有上班（班次内）→ 缺下班
-            if ci and not co:
-                if month == month_key and get_shift(ci, uid):
-                    miss_checkout.append(
-                        f"- {date} {ci.strftime('%Y-%m-%d %H:%M:%S')} 未打卡下班"
-                    )
-                continue
-
-    text = "\n📊 考勤统计：\n"
-    text += f"🗓️ 本月已正常上班：{worked_this_month} 天\n"
-    text += f"📊 累计正常上班：{worked_total} 天\n"
-
-    if miss_checkin:
-        text += "⚠️ 未打卡上班记录：\n" + "\n".join(miss_checkin) + "\n"
-
-    if miss_checkout:
-        text += "⚠️ 未打卡下班记录：\n" + "\n".join(miss_checkout) + "\n"
-
-    return text
-
+    # 提前打卡 → 默认早班
+    return {
+        "role": "PROMO",
+        "shift": "MORNING",
+        "start": time(6, 0),
+        "end": time(12, 0),
+    }
 
 # ===== Send group =====
 def send_group(msg):
@@ -300,15 +348,29 @@ def start(message):
     else:
         # ✅ 已注册，只提示 + 显示上班状态
         status = (
-            f"🟢 已上班：{CHECK_IN_STATUS[uid].strftime('%H:%M:%S')}"
+            f"🟢 已上班：{CHECK_IN_STATUS[uid]['time'].strftime('%H:%M:%S')}"
             if uid in CHECK_IN_STATUS else "🔴 未上班"
-        )
+)
+
 
         bot.send_message(
             message.chat.id,
             f"✅ 已注册\n{status}\n\n" + stats_text(uid),
             reply_markup=main_keyboard()
         )
+
+@bot.message_handler(commands=["attendance"])
+def attendance_report(message):
+    uid = message.from_user.id
+
+    month_days, total_days = get_attendance_summary(uid)
+
+    bot.reply_to(
+        message,
+        f"📊 考勤统计\n"
+        f"🗓️ 本月已正常上班：{month_days} 天\n"
+        f"📈 累计正常上班：{total_days} 天"
+    )
 
 
 # ===== Start Activity =====
@@ -381,71 +443,147 @@ def start_activity(uid, name, act):
 
     countdown()
 # ===== Check In / Out =====
+
+
 def check_in(uid, name):
+    now_dt = now()
+
     if uid in CHECK_IN_STATUS:
         safe_pm(uid, "❌ You are already checked in.")
         return
 
-    CHECK_IN_STATUS[uid] = now()
-    check_time = CHECK_IN_STATUS[uid].strftime('%H:%M:%S')
+    shift_info = get_shift_standard(now_dt, uid)
+    if not shift_info:
+        safe_pm(uid, "⛔ 当前不在你的上班班次时间内")
+        return
 
-    # ✅ 群提示（保持你原来的）
-    send_group(f"✅ {name} checked in at {check_time}")
-    # ===== ✅【新增】记录上班打卡（唯一位置）=====
-    now_dt = CHECK_IN_STATUS[uid]
-    month_key = now_dt.strftime("%Y-%m")
-    date_key = now_dt.strftime("%Y-%m-%d")
+    # ===== finding / promo 凌晨算前一天 =====
+    logical_date = now_dt.date()
+    if shift_info["role"] in ("FINDING", "PROMO") and now_dt.time() < time(6, 0):
+        logical_date -= timedelta(days=1)
+
+    # ===== 迟到 =====
+    late_minutes = 0
+    shift_start_dt = datetime.combine(
+        logical_date,
+        shift_info["start"],
+        tzinfo=LOCAL_TZ
+    )
+
+    if now_dt > shift_start_dt:
+        late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
+
+    CHECK_IN_STATUS[uid] = {
+        "time": now_dt,
+        "logical_date": logical_date,
+        "shift": shift_info
+    }
+
+    month_key = logical_date.strftime("%Y-%m")
+    date_key = logical_date.strftime("%Y-%m-%d")
 
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
     ATTENDANCE[uid][month_key][date_key]["checkin"] = now_dt
+    ATTENDANCE[uid][month_key][date_key]["late_minutes"] = late_minutes
+
     save_attendance()
 
-    # ✅ 私聊状态更新（关键新增）
+    msg = f"✅ {name} checked in at {now_dt.strftime('%H:%M:%S')}"
+    if late_minutes > 0:
+        msg += f" ⚠️ Late {late_minutes} min"
+    send_group(msg)
+
     safe_pm(
         uid,
-        f"✅ Registered\n"
-        f"🟢 Already at work：{check_time}\n\n"
-        + stats_text(uid),
+        f"🟢 已上班：{now_dt.strftime('%H:%M:%S')}\n"
+        f"👔 班次：{shift_info['role']} {shift_info['shift']}\n"
+        f"⏰ 迟到：{late_minutes} 分钟",
         reply_markup=main_keyboard()
     )
+
 
 def check_out(uid, name):
     if uid not in CHECK_IN_STATUS:
         safe_pm(uid, "❌ You must check in first.")
         return
 
-    start = CHECK_IN_STATUS[uid]
-    end = now()
-    diff = end - start
+    record = CHECK_IN_STATUS[uid]
+    start_dt = record["time"]
+    logical_date = record["logical_date"]
+    shift_info = record["shift"]
 
+    end_dt = now()
+
+    # ===== 早退 =====
+    early_leave_minutes = 0
+
+    # ===== 夜班特殊规则（FINDING / PROMO）=====
+    if shift_info.get("cross_day") and shift_info["role"] in ("FINDING", "PROMO"):
+
+        # 👉 只在 19:00–23:59 之间下班才算早退
+        if time(19, 0) <= end_dt.time() <= time(23, 59, 59):
+            shift_end_dt = datetime.combine(
+                logical_date,
+                time(23, 59, 59),
+                tzinfo=LOCAL_TZ
+            )
+            if end_dt < shift_end_dt:
+                early_leave_minutes = int(
+                    (shift_end_dt - end_dt).total_seconds() // 60
+                )
+        else:
+            # 00:00–06:00 下班 → 不算早退
+            early_leave_minutes = 0
+
+    # ===== 其它班次（HR / 早班）=====
+    else:
+        if shift_info.get("cross_day"):
+            shift_end_dt = datetime.combine(
+                logical_date + timedelta(days=1),
+                shift_info["end"],
+                tzinfo=LOCAL_TZ
+            )
+        else:
+            shift_end_dt = datetime.combine(
+                logical_date,
+                shift_info["end"],
+                tzinfo=LOCAL_TZ
+            )
+
+        if end_dt < shift_end_dt:
+            early_leave_minutes = int(
+                (shift_end_dt - end_dt).total_seconds() // 60
+            )
+
+    # ===== 工时 =====
+    diff = end_dt - start_dt
     total_seconds = int(diff.total_seconds())
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
     seconds = total_seconds % 60
 
-    # 👉 员工显示名（必须在函数内）
-    display_name = f"{name}+{uid}【Nexbit-Safe】"
-
-    # ===== 记录下班打卡 =====
-    now_dt = end
-    month_key = now_dt.strftime("%Y-%m")
-    date_key = now_dt.strftime("%Y-%m-%d")
+    # ===== 写回同一天 =====
+    month_key = logical_date.strftime("%Y-%m")
+    date_key = logical_date.strftime("%Y-%m-%d")
 
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
-    ATTENDANCE[uid][month_key][date_key]["checkout"] = now_dt
+    ATTENDANCE[uid][month_key][date_key]["checkout"] = end_dt
+    ATTENDANCE[uid][month_key][date_key]["early_leave_minutes"] = early_leave_minutes
+
     save_attendance()
 
-    # ===== 群消息（完整 & 缩进正确）=====
     send_group(
-        f"👤 {display_name}\n"
-        f"✅ Checked out successfully\n"
-        f"📅 Check-in time: {start.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"📅 Check-out time: {end.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"⏰ Work duration: {hours}h {minutes}m {seconds}s\n"
-        + build_month_report(uid, end)
+        f"👤 {name}+{uid}【Nexbit-Safe】\n"
+        f"🏠 Checked out\n"
+        f"🕘 In: {start_dt.strftime('%H:%M:%S')}\n"
+        f"🕕 Out: {end_dt.strftime('%H:%M:%S')}\n"
+        f"⏱ {hours}h {minutes}m {seconds}s\n"
+        f"⚠️ Early leave: {early_leave_minutes} min"
     )
 
     del CHECK_IN_STATUS[uid]
+
+
 
 
 # ===== Return =====
