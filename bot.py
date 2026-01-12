@@ -1,7 +1,7 @@
 import json
 
 DATA_FILE = "attendance.json"
-
+REGISTER_FILE = "registered_users.json"
 import os
 import threading
 from datetime import datetime, timedelta, time
@@ -43,6 +43,27 @@ def load_attendance():
 
     except Exception as e:
         print("❌ Failed to load attendance.json:", e)
+def load_registered_users():
+    global REGISTERED_USERS
+    if not os.path.exists(REGISTER_FILE):
+        print("📂 registered_users.json not found, starting fresh")
+        return
+
+    try:
+        with open(REGISTER_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            REGISTERED_USERS = set(map(int, data))
+        print("✅ Registered users loaded")
+    except Exception as e:
+        print("❌ Failed to load registered users:", e)
+
+
+def save_registered_users():
+    try:
+        with open(REGISTER_FILE, "w", encoding="utf-8") as f:
+            json.dump(list(REGISTERED_USERS), f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("❌ Failed to save registered users:", e)
 
 def save_attendance():
     data = {}
@@ -378,6 +399,7 @@ def start_activity(uid, name, act):
     # ✅ 没点 /start 也能正常用（关键）
     if uid not in REGISTERED_USERS:
         REGISTERED_USERS.add(uid)
+        save_registered_users()
 
     user_sessions.setdefault(uid, {
         "Eating": 0,
@@ -570,19 +592,46 @@ def check_out(uid, name):
     ATTENDANCE[uid][month_key][date_key]["checkout"] = end_dt
     ATTENDANCE[uid][month_key][date_key]["early_leave_minutes"] = early_leave_minutes
 
+    # ===== 保存 =====
     save_attendance()
 
-    send_group(
-        f"👤 {name}+{uid}【Nexbit-Safe】\n"
-        f"🏠 Checked out\n"
-        f"🕘 In: {start_dt.strftime('%H:%M:%S')}\n"
-        f"🕕 Out: {end_dt.strftime('%H:%M:%S')}\n"
-        f"⏱ {hours}h {minutes}m {seconds}s\n"
-        f"⚠️ Early leave: {early_leave_minutes} min"
+    # ===== 统计 =====
+    month_days, total_days = get_attendance_summary(uid)
+    late_minutes = ATTENDANCE[uid][month_key][date_key].get("late_minutes", 0)
+
+    # ===== 状态文案 =====
+    status_line = []
+    if late_minutes > 0:
+        status_line.append(f"⚠️ Late: {late_minutes} min")
+    if early_leave_minutes > 0:
+        status_line.append(f"⚠️ Early leave: {early_leave_minutes} min")
+
+    status_text = " / ".join(status_line) if status_line else "✅ On time"
+
+    # ===== 私聊给本人（完整版）=====
+    msg = (
+        f"✅ Checked out successfully\n"
+        f"📅 Check-in time: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"📅 Check-out time: {end_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"⏰ Work duration: {hours}h {minutes}m {seconds}s\n"
+        f"{status_text}\n\n"
+        f"📊 考勤统计：\n"
+        f"🗓️ 本月已正常上班：{month_days} 天\n"
+        f"📊 累计正常上班：{total_days} 天"
     )
 
-    del CHECK_IN_STATUS[uid]
+    safe_pm(uid, msg, reply_markup=main_keyboard())
 
+    # ===== 群里（简版）=====
+    send_group(
+        f"👤 {name}+{uid}【Nexbit-Safe】\n"
+        f"✅ Checked out\n"
+        f"⏰ {hours}h {minutes}m {seconds}s\n"
+        f"{status_text}"
+    )
+
+    # ===== 清状态（一定要在函数里、最后）=====
+    del CHECK_IN_STATUS[uid]
 
 
 
@@ -659,13 +708,10 @@ def handler(message):
 # ===== Run =====
 if __name__ == "__main__":
     load_attendance()
+    load_registered_users()
     print("🤖 Bot started (JSON persistence)")
     bot.infinity_polling(
         skip_pending=True,
         timeout=20,
         long_polling_timeout=20
     )
-
-
-
-
