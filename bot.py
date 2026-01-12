@@ -484,16 +484,24 @@ def check_in(uid, name):
     if shift_info["role"] in ("FINDING", "PROMO") and now_dt.time() < time(6, 0):
         logical_date -= timedelta(days=1)
 
-    # ===== 迟到 =====
-    late_minutes = 0
-    shift_start_dt = datetime.combine(
-        logical_date,
-        shift_info["start"],
-        tzinfo=LOCAL_TZ
-    )
+# ===== 迟到 =====
+late_minutes = 0
+shift_start_dt = datetime.combine(
+    logical_date,
+    shift_info["start"],
+    tzinfo=LOCAL_TZ
+)
 
+# ✅ 其他员工照常计算迟到
+if uid not in HR_USERS and uid not in FINDING_USERS and shift_info["role"] != "PROMO":
     if now_dt > shift_start_dt:
         late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
+
+# HR / FINDING / PROMO 提前或准点打卡都算 0 分钟迟到
+else:
+    late_minutes = 0
+
+
 
     CHECK_IN_STATUS[uid] = {
         "time": now_dt,
