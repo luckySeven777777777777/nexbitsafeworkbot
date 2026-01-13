@@ -235,17 +235,12 @@ def get_attendance_summary(uid):
 
     for month, days in ATTENDANCE[uid].items():
         for day, rec in days.items():
-            # 只要有 checkin 就算上班一天
             if rec.get("checkin") and rec.get("checkout"):
                 total_days.add(day)
                 if month == current_month:
                     month_days.add(day)
 
     return len(month_days), len(total_days)
-
-
-    if uid not in user_sessions:
-        return "No records"
 
     s = user_sessions[uid]
     return (
@@ -465,8 +460,6 @@ def start_activity(uid, name, act):
 
     countdown()
 # ===== Check In / Out =====
-
-
 def check_in(uid, name):
     now_dt = now()
 
@@ -492,8 +485,14 @@ def check_in(uid, name):
         tzinfo=LOCAL_TZ
     )
 
-    if now_dt > shift_start_dt:
-        late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
+    # ✅ FINDING / PROMO：上班时间之前打卡，不算迟到
+    if shift_info["role"] in ("FINDING", "PROMO"):
+        if now_dt > shift_start_dt:
+            late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
+    else:
+        # 其他岗位维持原规则
+        if now_dt > shift_start_dt:
+            late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
 
     CHECK_IN_STATUS[uid] = {
         "time": now_dt,
@@ -522,6 +521,7 @@ def check_in(uid, name):
         f"⏰ 迟到：{late_minutes} 分钟",
         reply_markup=main_keyboard()
     )
+
 
 
 def check_out(uid, name):
