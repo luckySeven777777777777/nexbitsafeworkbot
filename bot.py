@@ -217,7 +217,7 @@ def stats_text(uid):
     )
 
 
-# ===== Attendance Statistics =====
+# ===== Attendance Statistics (修正版) =====
 def get_attendance_summary(uid):
     """
     返回：
@@ -235,12 +235,16 @@ def get_attendance_summary(uid):
 
     for month, days in ATTENDANCE[uid].items():
         for day, rec in days.items():
+            # ✅ 只统计有 checkin 和 checkout 的天
             if rec.get("checkin") and rec.get("checkout"):
-                total_days.add(day)
+                # 用完整日期字符串确保跨月不会重复
+                full_date = f"{month}-{day[-2:]}"  # "YYYY-MM-DD"
+                total_days.add(full_date)
                 if month == current_month:
-                    month_days.add(day)
+                    month_days.add(full_date)
 
     return len(month_days), len(total_days)
+
 
 
     s = user_sessions[uid]
