@@ -216,7 +216,33 @@ def stats_text(uid):
         f"📝 Other: {s['Other']} / {MAX_TIMES['Other']} TIME\n"
     )
 
+# ===== 新增整合统计函数 =====
+def full_stats_text(uid):
+    """
+    返回整合版统计：
+    📊 考勤 + 活动次数
+    """
+    month_days, total_days = get_attendance_summary(uid)
 
+    session = user_sessions.get(uid, {
+        "Eating": 0,
+        "ToiletSmall": 0,
+        "ToiletLarge": 0,
+        "Smoking": 0,
+        "Other": 0,
+    })
+
+    text = (
+        f"📊 考勤统计\n"
+        f"🗓️ 本月：{month_days} 天\n"
+        f"📈 累计：{total_days} 天\n\n"
+        f"🍽 Eat: {session['Eating']} / {MAX_TIMES['Eating']}\n"
+        f"💧 Pee: {session['ToiletSmall']} / {MAX_TIMES['ToiletSmall']}\n"
+        f"🚽 Toilet: {session['ToiletLarge']} / {MAX_TIMES['ToiletLarge']}\n"
+        f"🚬 Smoking: {session['Smoking']} / {MAX_TIMES['Smoking']}\n"
+        f"📝 Other: {session['Other']} / {MAX_TIMES['Other']}"
+    )
+    return text
 # ===== Attendance Statistics =====
 def get_attendance_summary(uid):
     """
@@ -241,6 +267,7 @@ def get_attendance_summary(uid):
                     month_days.add(day)
 
     return len(month_days), len(total_days)
+
 
     s = user_sessions[uid]
     return (
@@ -355,12 +382,13 @@ def start(message):
         })
         user_logs.setdefault(uid, [])
 
-        bot.send_message(
-            message.chat.id,
-            "✅ Registration successful. No need to click again in the future. /start\n\n"
-            + stats_text(uid),
-            reply_markup=main_keyboard()
-        )
+bot.send_message(
+    message.chat.id,
+    "✅ Registration successful. No need to click again in the future. /start\n\n"
+    + full_stats_text(uid),  # ← 这里改成 full_stats_text
+    reply_markup=main_keyboard()
+)
+
     else:
         # ✅ 已注册，只提示 + 显示上班状态
         status = (
@@ -369,24 +397,18 @@ def start(message):
 )
 
 
-        bot.send_message(
-            message.chat.id,
-            f"✅ 已注册\n{status}\n\n" + stats_text(uid),
-            reply_markup=main_keyboard()
-        )
+bot.send_message(
+    message.chat.id,
+    f"✅ 已注册\n{status}\n\n" + full_stats_text(uid),  # ← 这里也改
+    reply_markup=main_keyboard()
+)
+
 
 @bot.message_handler(commands=["attendance"])
 def attendance_report(message):
     uid = message.from_user.id
+    bot.reply_to(message, full_stats_text(uid))
 
-    month_days, total_days = get_attendance_summary(uid)
-
-    bot.reply_to(
-        message,
-        f"📊 考勤统计\n"
-        f"🗓️ 本月已正常上班：{month_days} 天\n"
-        f"📈 累计正常上班：{total_days} 天"
-    )
 
 
 # ===== Start Activity =====
@@ -667,7 +689,7 @@ def back(message):
 
     user_logs.setdefault(uid, []).append(log)
 
-    safe_pm(uid, "✅ Returned\n" + stats_text(uid))
+    safe_pm(uid, "✅ Returned\n" + full_stats_text(uid))
 
     send_group(
         f"👤 {name}\n"
