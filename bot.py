@@ -219,11 +219,6 @@ def stats_text(uid):
 
 # ===== Attendance Statistics (修正版) =====
 def get_attendance_summary(uid):
-    """
-    返回：
-    本月正常上班天数 X
-    累计正常上班天数 Y
-    """
     if uid not in ATTENDANCE:
         return 0, 0
 
@@ -235,15 +230,44 @@ def get_attendance_summary(uid):
 
     for month, days in ATTENDANCE[uid].items():
         for day, rec in days.items():
-            # ✅ 只统计有 checkin 和 checkout 的天
-            if rec.get("checkin") and rec.get("checkout"):
-                # 用完整日期字符串确保跨月不会重复
-                full_date = f"{month}-{day[-2:]}"  # "YYYY-MM-DD"
-                total_days.add(full_date)
-                if month == current_month:
-                    month_days.add(full_date)
+            # 要求早班和晚班都必须打卡
+            checkin = rec.get("checkin")
+            checkout = rec.get("checkout")
+
+            if not checkin or not checkout:
+                continue
+
+            # 对于 FINDING 和 PROMO 用户，要确认当天打卡覆盖早班和晚班
+            # 判断是否是早班和晚班都有记录(需要更详细的打卡时间判断)
+            # 简单判断：早班打卡时间应在早班时段，晚班打卡时间应在晚班时段
+
+            shift_info_in = get_shift_standard(checkin, uid)
+            shift_info_out = get_shift_standard(checkout, uid)
+
+            # 对于 FINDING 和 PROMO 角色，判断是否打了早班和晚班
+            if shift_info_in["role"] in ("FINDING", "PROMO"):
+                morning_start, morning_end = SHIFT_RULES[shift_info_in["role"]]["morning"]
+                night_start, night_end = SHIFT_RULES[shift_info_in["role"]]["night"]
+
+                # 检查早班打卡时间
+                if not (morning_start <= checkin.time() <= morning_end):
+                    continue
+                # 检查晚班打卡时间
+                # 晚班跨天，时间判断稍复杂
+                if night_start <= checkout.time() or checkout.time() < time(2, 0):
+                    # 满足晚班条件
+                    pass
+                else:
+                    continue
+
+            # 如果通过上述判断，计入天数
+            full_date = f"{month}-{day[-2:]}"
+            total_days.add(full_date)
+            if month == current_month:
+                month_days.add(full_date)
 
     return len(month_days), len(total_days)
+
 
 
 
@@ -281,12 +305,12 @@ def get_shift_standard(dt, uid):
             }
 
         # 晚班（跨天）
-        if t >= time(19, 0) or t < time(6, 0):
+        if t >= time(19, 0) or t < time(2, 0):
             return {
                 "role": "FINDING",
                 "shift": "NIGHT",
                 "start": time(19, 0),
-                "end": time(6, 0),   # 次日 06:00
+                "end": time(2, 0),   # 次日 02:00
                 "cross_day": True
             }
 
@@ -307,12 +331,12 @@ def get_shift_standard(dt, uid):
             "end": time(12, 0),
         }
 
-    if t >= time(19, 0) or t < time(6, 0):
+    if t >= time(19, 0) or t < time(2, 0):
         return {
             "role": "PROMO",
             "shift": "NIGHT",
             "start": time(19, 0),
-            "end": time(6, 0),
+            "end": time(2, 0),
             "cross_day": True
         }
 
@@ -479,7 +503,7 @@ def check_in(uid, name):
 
     # ===== finding / promo 凌晨算前一天 =====
     logical_date = now_dt.date()
-    if shift_info["role"] in ("FINDING", "PROMO") and now_dt.time() < time(6, 0):
+    if shift_info["role"] in ("FINDING", "PROMO") and now_dt.time() < time(2, 0):
         logical_date -= timedelta(days=1)
 
     # ===== 迟到 =====
