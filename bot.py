@@ -501,6 +501,19 @@ def check_in(uid, name):
         safe_pm(uid, "⛔ 当前不在你的上班班次时间内")
         return
 
+    # ===== ✅ 夜班提前打卡修复 =====
+    if shift_info["role"] in ("FINDING", "PROMO"):
+        night_start = time(19, 0)
+        if now_dt.time() < night_start:
+            shift_info = {
+                "role": shift_info["role"],
+                "shift": "NIGHT",
+                "start": night_start,
+                "end": time(2, 0),
+                "cross_day": True
+            }
+
+
     # ===== finding / promo 凌晨算前一天 =====
     logical_date = now_dt.date()
     if shift_info["role"] in ("FINDING", "PROMO") and now_dt.time() < time(2, 0):
