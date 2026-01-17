@@ -76,6 +76,12 @@ def save_attendance():
                 data[str(uid)][month][day] = {
     "checkin": rec.get("checkin").isoformat() if rec.get("checkin") else None,
     "checkout": rec.get("checkout").isoformat() if rec.get("checkout") else None,
+
+    "morning_checkin": rec.get("morning_checkin").isoformat() if rec.get("morning_checkin") else None,
+    "morning_checkout": rec.get("morning_checkout").isoformat() if rec.get("morning_checkout") else None,
+    "night_checkin": rec.get("night_checkin").isoformat() if rec.get("night_checkin") else None,
+    "night_checkout": rec.get("night_checkout").isoformat() if rec.get("night_checkout") else None,
+
     "late_minutes": rec.get("late_minutes", 0),
     "early_leave_minutes": rec.get("early_leave_minutes", 0),
 }
@@ -513,13 +519,12 @@ def check_in(uid, name):
                 "cross_day": True
             }
 
-
     # ===== finding / promo 凌晨算前一天 =====
     logical_date = now_dt.date()
     if shift_info["role"] in ("FINDING", "PROMO") and now_dt.time() < time(2, 0):
         logical_date -= timedelta(days=1)
 
-    # ===== 迟到 =====
+    # ===== 迟到计算 =====
     late_minutes = 0
     shift_start_dt = datetime.combine(
         logical_date,
@@ -527,12 +532,12 @@ def check_in(uid, name):
         tzinfo=LOCAL_TZ
     )
 
-    # ✅ FINDING / PROMO：上班时间之前打卡，不算迟到
     if shift_info["role"] in ("FINDING", "PROMO"):
-        if now_dt > shift_start_dt:
+        if now_dt.time() < shift_info["start"]:
+            late_minutes = 0  # 明确说明提前打卡不算迟到
+        elif now_dt > shift_start_dt:
             late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
     else:
-        # 其他岗位维持原规则
         if now_dt > shift_start_dt:
             late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
 
@@ -546,8 +551,19 @@ def check_in(uid, name):
     date_key = logical_date.strftime("%Y-%m-%d")
 
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
-    ATTENDANCE[uid][month_key][date_key]["checkin"] = now_dt
-    ATTENDANCE[uid][month_key][date_key]["late_minutes"] = late_minutes
+    day_rec = ATTENDANCE[uid][month_key][date_key]
+
+    # ===== FINDING / PROMO：区分早班 / 晚班 =====
+    if shift_info["role"] in ("FINDING", "PROMO"):
+        if shift_info["shift"] == "MORNING":
+            day_rec["morning_checkin"] = now_dt
+        elif shift_info["shift"] == "NIGHT":
+            day_rec["night_checkin"] = now_dt
+    else:
+        # ===== HR =====
+        day_rec["checkin"] = now_dt
+
+    day_rec["late_minutes"] = late_minutes
 
     save_attendance()
 
@@ -565,7 +581,6 @@ def check_in(uid, name):
     )
 
 
-
 def check_out(uid, name):
     if uid not in CHECK_IN_STATUS:
         safe_pm(uid, "❌ You must check in first.")
@@ -578,7 +593,7 @@ def check_out(uid, name):
 
     end_dt = now()
 
-    # ===== 早退 =====
+    # ===== 早退计算 =====
     early_leave_minutes = 0
 
     # ===== 夜班特殊规则（FINDING / PROMO）=====
@@ -599,7 +614,6 @@ def check_out(uid, name):
             # 00:00–06:00 下班 → 不算早退
             early_leave_minutes = 0
 
-    # ===== 其它班次（HR / 早班）=====
     else:
         if shift_info.get("cross_day"):
             shift_end_dt = datetime.combine(
@@ -619,22 +633,31 @@ def check_out(uid, name):
                 (shift_end_dt - end_dt).total_seconds() // 60
             )
 
-    # ===== 工时 =====
+    # ===== 计算工时 =====
     diff = end_dt - start_dt
     total_seconds = int(diff.total_seconds())
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
     seconds = total_seconds % 60
 
-    # ===== 写回同一天 =====
     month_key = logical_date.strftime("%Y-%m")
     date_key = logical_date.strftime("%Y-%m-%d")
 
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
-    ATTENDANCE[uid][month_key][date_key]["checkout"] = end_dt
-    ATTENDANCE[uid][month_key][date_key]["early_leave_minutes"] = early_leave_minutes
+    day_rec = ATTENDANCE[uid][month_key][date_key]
 
-    # ===== 保存 =====
+    # ===== FINDING / PROMO：区分早班 / 晚班 =====
+    if shift_info["role"] in ("FINDING", "PROMO"):
+        if shift_info["shift"] == "MORNING":
+            day_rec["morning_checkout"] = end_dt
+        elif shift_info["shift"] == "NIGHT":
+            day_rec["night_checkout"] = end_dt
+    else:
+        # ===== HR =====
+        day_rec["checkout"] = end_dt
+
+    day_rec["early_leave_minutes"] = early_leave_minutes
+
     save_attendance()
 
     # ===== 统计 =====
@@ -650,7 +673,7 @@ def check_out(uid, name):
 
     status_text = " / ".join(status_line) if status_line else "✅ On time"
 
-    # ===== 私聊给本人（完整版）=====
+    # ===== 私聊给本人 =====
     msg = (
         f"✅ Checked out successfully\n"
         f"📅 Check-in time: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -664,7 +687,7 @@ def check_out(uid, name):
 
     safe_pm(uid, msg, reply_markup=main_keyboard())
 
-    # ===== 群里（简版）=====
+    # ===== 群里通知 =====
     send_group(
         f"👤 {name}+{uid}【Nexbit-Safe】\n\n"
         f"✅ Checked out successfully\n"
@@ -675,11 +698,10 @@ def check_out(uid, name):
         f"📊 考勤统计：\n"
         f"🗓️ 本月已正常上班：{month_days} 天\n"
         f"📊 累计正常上班：{total_days} 天"
-)
+    )
 
-    # ===== 清状态（一定要在函数里、最后）=====
+    # ===== 清除状态 =====
     del CHECK_IN_STATUS[uid]
-
 
 
 # ===== Return =====
