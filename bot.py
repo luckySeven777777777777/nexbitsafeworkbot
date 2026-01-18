@@ -510,7 +510,7 @@ def check_in(uid, name):
     # ===== ✅ 夜班提前打卡修复 =====
     if shift_info["role"] in ("FINDING", "PROMO"):
         night_start = time(19, 0)
-        if now_dt.time() < night_start:
+        if time(12, 0) <= now_dt.time() < night_start:
             shift_info = {
                 "role": shift_info["role"],
                 "shift": "NIGHT",
@@ -553,6 +553,7 @@ def check_in(uid, name):
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
     day_rec = ATTENDANCE[uid][month_key][date_key]
 
+
     # ===== FINDING / PROMO：区分早班 / 晚班 =====
     if shift_info["role"] in ("FINDING", "PROMO"):
         if shift_info["shift"] == "MORNING":
@@ -563,7 +564,11 @@ def check_in(uid, name):
         # ===== HR =====
         day_rec["checkin"] = now_dt
 
-    day_rec["late_minutes"] = late_minutes
+    # ✅【关键修复】迟到只增不减
+    old_late = day_rec.get("late_minutes", 0)
+    day_rec["late_minutes"] = max(old_late, late_minutes)
+
+
 
     save_attendance()
 
