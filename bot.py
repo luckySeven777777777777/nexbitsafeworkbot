@@ -12,6 +12,7 @@ from collections import defaultdict
 
 
 ATTENDANCE = defaultdict(lambda: defaultdict(dict))
+
 def load_attendance():
     global ATTENDANCE
     if not os.path.exists(DATA_FILE):
@@ -35,7 +36,20 @@ def load_attendance():
                     if rec.get("checkout"):
                         ATTENDANCE[uid][month][day]["checkout"] = datetime.fromisoformat(rec["checkout"])
 
-                    # ===== ✅【就在这里加】迟到 / 早退 =====
+                    # ===== 早班/晚班上班时间 =====
+                    if rec.get("morning_checkin"):
+                        ATTENDANCE[uid][month][day]["morning_checkin"] = datetime.fromisoformat(rec["morning_checkin"])
+
+                    if rec.get("morning_checkout"):
+                        ATTENDANCE[uid][month][day]["morning_checkout"] = datetime.fromisoformat(rec["morning_checkout"])
+
+                    if rec.get("night_checkin"):
+                        ATTENDANCE[uid][month][day]["night_checkin"] = datetime.fromisoformat(rec["night_checkin"])
+
+                    if rec.get("night_checkout"):
+                        ATTENDANCE[uid][month][day]["night_checkout"] = datetime.fromisoformat(rec["night_checkout"])
+
+                    # ===== 迟到 / 早退 =====
                     ATTENDANCE[uid][month][day]["late_minutes"] = rec.get("late_minutes", 0)
                     ATTENDANCE[uid][month][day]["early_leave_minutes"] = rec.get("early_leave_minutes", 0)
 
@@ -43,6 +57,7 @@ def load_attendance():
 
     except Exception as e:
         print("❌ Failed to load attendance.json:", e)
+
 def load_registered_users():
     global REGISTERED_USERS
     if not os.path.exists(REGISTER_FILE):
@@ -236,56 +251,25 @@ def get_attendance_summary(uid):
 
     for month, days in ATTENDANCE[uid].items():
         for day, rec in days.items():
-            # 要求早班和晚班都必须打卡
-            checkin = rec.get("checkin")
-            checkout = rec.get("checkout")
+            # HR 逻辑
+            if uid in HR_USERS:
+                if rec.get("checkin") and rec.get("checkout"):
+                    full_date = f"{month}-{day[-2:]}"
+                    total_days.add(full_date)
+                    if month == current_month:
+                        month_days.add(full_date)
 
-            if not checkin or not checkout:
-                continue
-
-            # 对于 FINDING 和 PROMO 用户，要确认当天打卡覆盖早班和晚班
-            # 判断是否是早班和晚班都有记录(需要更详细的打卡时间判断)
-            # 简单判断：早班打卡时间应在早班时段，晚班打卡时间应在晚班时段
-
-            shift_info_in = get_shift_standard(checkin, uid)
-            shift_info_out = get_shift_standard(checkout, uid)
-
-            # 对于 FINDING 和 PROMO 角色，判断是否打了早班和晚班
-            if shift_info_in["role"] in ("FINDING", "PROMO"):
-                morning_start, morning_end = SHIFT_RULES[shift_info_in["role"]]["morning"]
-                night_start, night_end = SHIFT_RULES[shift_info_in["role"]]["night"]
-
-                # 检查早班打卡时间
-                if not (morning_start <= checkin.time() <= morning_end):
-                    continue
-                # 检查晚班打卡时间
-                # 晚班跨天，时间判断稍复杂
-                if night_start <= checkout.time() or checkout.time() < time(2, 0):
-                    # 满足晚班条件
-                    pass
-                else:
-                    continue
-
-            # 如果通过上述判断，计入天数
-            full_date = f"{month}-{day[-2:]}"
-            total_days.add(full_date)
-            if month == current_month:
-                month_days.add(full_date)
+            # FINDING / PROMO 逻辑
+            else:
+                if (rec.get("morning_checkin") and rec.get("morning_checkout") and
+                    rec.get("night_checkin") and rec.get("night_checkout")):
+                    full_date = f"{month}-{day[-2:]}"
+                    total_days.add(full_date)
+                    if month == current_month:
+                        month_days.add(full_date)
 
     return len(month_days), len(total_days)
 
-
-
-
-    s = user_sessions[uid]
-    return (
-        f"👤 User ID: {uid}\n\n"
-        f"🍽 Eat: {s['Eating']} / {MAX_TIMES['Eating']} TIME\n"
-        f"💧 Pee: {s['ToiletSmall']} / {MAX_TIMES['ToiletSmall']} TIME\n"
-        f"🚽 Toilet: {s['ToiletLarge']} / {MAX_TIMES['ToiletLarge']} TIME\n"
-        f"🚬 Smoking: {s['Smoking']} / {MAX_TIMES['Smoking']} TIME\n"
-        f"📝 Other: {s['Other']} / {MAX_TIMES['Other']} TIME\n"
-    )
 
 def get_shift_standard(dt, uid):
     t = dt.time()
@@ -597,6 +581,11 @@ def check_out(uid, name):
     shift_info = record["shift"]
 
     end_dt = now()
+ 
+    # ===== 夜班跨天：凌晨算前一天 =====
+    if shift_info["role"] in ("FINDING", "PROMO") and shift_info.get("shift") == "NIGHT":
+        if end_dt.time() < time(2, 0):
+            logical_date -= timedelta(days=1)
 
     # ===== 早退计算 =====
     early_leave_minutes = 0
