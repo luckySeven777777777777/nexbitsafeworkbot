@@ -125,6 +125,12 @@ def now():
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID")) if os.getenv("GROUP_CHAT_ID") else None
 ADMIN_ID = int(os.getenv("ADMIN_ID")) if os.getenv("ADMIN_ID") else None
+LATE_BOT_TOKEN = os.getenv("LATE_BOT_TOKEN")
+LATE_GROUP_ID = int(os.getenv("LATE_GROUP_ID")) if os.getenv("LATE_GROUP_ID") else None
+
+late_bot = None
+if LATE_BOT_TOKEN and LATE_GROUP_ID:
+    late_bot = telebot.TeleBot(LATE_BOT_TOKEN)
 
 
 if not BOT_TOKEN:
@@ -358,6 +364,13 @@ def safe_pm(uid, text, reply_markup=None):
     except Exception as e:
         print(f"⚠️ PM failed for {uid}: {e}")
         return False
+def send_late_notice(msg):
+    if not late_bot or not LATE_GROUP_ID:
+        return
+    try:
+        late_bot.send_message(LATE_GROUP_ID, msg)
+    except Exception as e:
+        print("❌ send_late_notice failed:", e)
 
 # ===== /start =====
 @bot.message_handler(commands=["start"])
@@ -555,6 +568,13 @@ def check_in(uid, name):
     # ✅【关键修复】迟到只增不减
     old_late = day_rec.get("late_minutes", 0)
     day_rec["late_minutes"] = max(old_late, late_minutes)
+    # ===== 🚨 迟到 ≥5 分钟 → 发送到通知群 =====
+if late_minutes >= 5:
+    day = logical_date.day
+    period = "morning" if shift_info.get("shift") == "MORNING" else "night"
+
+    notice = f"{day}day {period} ⚠️ late {late_minutes}min"
+    send_late_notice(notice)
 
 
 
@@ -782,7 +802,4 @@ if __name__ == "__main__":
         timeout=20,
         long_polling_timeout=20
     )
-
-
-
 
