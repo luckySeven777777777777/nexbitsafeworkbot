@@ -12,6 +12,8 @@ from collections import defaultdict
 
 
 ATTENDANCE = defaultdict(lambda: defaultdict(dict))
+# ✅【新增】永久注册用户
+REGISTERED_USERS = set()
 
 def load_attendance():
     global ATTENDANCE
@@ -208,8 +210,7 @@ user_activity = {}
 user_sessions = {}
 CHECK_IN_STATUS = {}
 
-# ✅【新增】永久注册用户
-REGISTERED_USERS = set()
+
 
 # ===== ERA Style Logs (NEW) =====
 user_logs = {}
@@ -368,7 +369,7 @@ def send_late_notice(msg):
     if not late_bot or not LATE_GROUP_ID:
         return
     try:
-        late_bot.send_message(LATE_GROUP_ID, msg)
+        late_bot.send_message(LATE_GROUP_ID, msg, parse_mode="HTML")
     except Exception as e:
         print("❌ send_late_notice failed:", e)
 
@@ -535,7 +536,7 @@ def check_in(uid, name):
 
     if shift_info["role"] in ("FINDING", "PROMO"):
         if now_dt.time() < shift_info["start"]:
-            late_minutes = 0  # 明确说明提前打卡不算迟到
+            late_minutes = 0
         elif now_dt > shift_start_dt:
             late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
     else:
@@ -554,7 +555,6 @@ def check_in(uid, name):
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
     day_rec = ATTENDANCE[uid][month_key][date_key]
 
-
     # ===== FINDING / PROMO：区分早班 / 晚班 =====
     if shift_info["role"] in ("FINDING", "PROMO"):
         if shift_info["shift"] == "MORNING":
@@ -565,18 +565,23 @@ def check_in(uid, name):
         # ===== HR =====
         day_rec["checkin"] = now_dt
 
-    # ✅【关键修复】迟到只增不减
+    # ✅【关键修复】迟到只增不减（⚠️ 必须在 if/else 外）
     old_late = day_rec.get("late_minutes", 0)
     day_rec["late_minutes"] = max(old_late, late_minutes)
+
     # ===== 🚨 迟到 ≥5 分钟 → 发送到通知群 =====
-if late_minutes >= 5:
-    day = logical_date.day
-    period = "morning" if shift_info.get("shift") == "MORNING" else "night"
+    if late_minutes >= 5:
+        day = logical_date.day
 
-    notice = f"{day}day {period} ⚠️ late {late_minutes}min"
-    send_late_notice(notice)
+        # HR 不管白天晚上，固定 day
+        if shift_info["role"] == "HR":
+            period = "day"
+        else:
+            period = "morning" if shift_info["shift"] == "MORNING" else "night"
 
-
+        # 自动艾特（用 tg://user?id=UID）
+        notice = f"<a href='tg://user?id={uid}'>{name}</a> {day}day {period} ⚠️ late {late_minutes}min"
+        send_late_notice(notice)
 
     save_attendance()
 
