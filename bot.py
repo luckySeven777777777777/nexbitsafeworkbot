@@ -172,6 +172,8 @@ def ordinal(n):
 HR_USERS = {
     6725112018,
     6478034136,
+    8005614048,
+    8453417442,
 }
 
 # ===== FINDING 用户配置（Telegram user_id）=====
@@ -190,7 +192,9 @@ FINDING_USERS = {
     7444326851,
     1767649471,
     1966382979,
-    6300562515,# finding 员工 2
+    6300562515,
+    7304897866,
+    7329147658,# finding 员工 2
 }
 SHIFT_RULES = {
     "HR": {
@@ -809,5 +813,6 @@ if __name__ == "__main__":
         timeout=20,
         long_polling_timeout=20
     )
+
 
 
