@@ -174,6 +174,7 @@ HR_USERS = {
     6478034136,
     8005614048,
     8453417442,
+    7329147658,
 }
 
 # ===== FINDING 用户配置（Telegram user_id）=====
@@ -193,8 +194,7 @@ FINDING_USERS = {
     1767649471,
     1966382979,
     6300562515,
-    7304897866,
-    7329147658,# finding 员工 2
+    7304897866,# finding 员工 2
 }
 SHIFT_RULES = {
     "HR": {
@@ -813,6 +813,7 @@ if __name__ == "__main__":
         timeout=20,
         long_polling_timeout=20
     )
+
 
 
 
