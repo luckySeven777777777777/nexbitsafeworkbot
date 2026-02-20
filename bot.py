@@ -121,7 +121,6 @@ LOCAL_TZ = ZoneInfo("Asia/Yangon")  # 缅甸
 # 如果是中国用：ZoneInfo("Asia/Shanghai")
 
 def now():
-    print("USING LOCAL TZ:", LOCAL_TZ)
     return datetime.now(LOCAL_TZ)
 # ===== Load env =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -373,25 +372,48 @@ def send_group(msg):
         bot.send_message(GROUP_CHAT_ID, msg)
     except Exception as e:
         print("❌ send_group failed:", e)
-
+# ===== Send late notice =====
+def send_late_notice(msg):
+    if late_bot and LATE_GROUP_ID:
+        try:
+            late_bot.send_message(
+                LATE_GROUP_ID,
+                msg,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            print("❌ send_late_notice failed:", e)
 def safe_pm(uid, text, reply_markup=None):
     try:
+        # 🔎 先检查这个ID是不是机器人
+        chat = bot.get_chat(uid)
+
+        # 如果是机器人，直接跳过
+        if getattr(chat, "is_bot", False):
+            print(f"🚫 Skipping bot user {uid}")
+            return False
+
         bot.send_message(uid, text, reply_markup=reply_markup)
         return True
+
     except Exception as e:
+        error_text = str(e)
+
+        # 🚫 如果是 403 或被拉黑，自动忽略
+        if "403" in error_text or "bot was blocked" in error_text:
+            print(f"🚫 User {uid} blocked bot or is invalid.")
+            return False
+
         print(f"⚠️ PM failed for {uid}: {e}")
         return False
-def send_late_notice(msg):
-    if not late_bot or not LATE_GROUP_ID:
-        return
-    try:
-        late_bot.send_message(LATE_GROUP_ID, msg, parse_mode="HTML")
-    except Exception as e:
-        print("❌ send_late_notice failed:", e)
-
 # ===== /start =====
 @bot.message_handler(commands=["start"])
 def start(message):
+
+    # 🚫 如果是机器人，直接忽略
+    if message.from_user.is_bot:
+        return
+
     uid = message.from_user.id
     name = message.from_user.first_name
 
@@ -489,29 +511,27 @@ def start_activity(uid, name, act):
     display_name = f"{uid}+{name} 【Nexbit-Safe】"
     activity_name = ACTIVITY_LABELS[act]
 
-    # ===== 发送 ERA 风格群提示 =====
+    # ===== ERA 风格提示 =====
     send_group(
         f"👤 {display_name}\n"
         f"📅 Time: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
         f"✅ Activity: {activity_name}\n"
-        f"⚠️ This is your {ordinal(used)} {activity_name}, "
-        f"remaining {activity_name} times this shift: {remaining}\n\n"
+        f"⚠️ This is your {ordinal(user_sessions[uid][act])} {activity_name}, "
+        f"remaining {MAX_TIMES[act]-user_sessions[uid][act]} times this shift\n\n"
         f"👇 Please click [Return] after finishing the activity"
     )
 
     safe_pm(uid, f"✅ {activity_name} started")
 
+    # ===== countdown 定时器 =====
     def countdown():
         if uid not in user_activity:
             return
-        elapsed = (now() - start_dt).total_seconds() / 60
-        if elapsed >= ACTIVITY_TIMES[act]:
-            activity_timeout[uid] = True
-            send_group(f"⏰ {display_name} {activity_name} TIMEOUT ⚠️")
-            return
-        threading.Timer(60, countdown).start()
+        activity_timeout[uid] = True
+        send_group(f"⏰ {display_name} {activity_name} TIMEOUT ⚠️")
 
-    countdown()
+    threading.Timer(ACTIVITY_TIMES[act] * 60, countdown).start()
+
 # ===== Check In / Out =====
 def check_in(uid, name):
     now_dt = now()
@@ -744,7 +764,7 @@ def check_out(uid, name):
 
 
 # ===== Return =====
-@bot.message_handler(func=lambda m: "Return" in m.text)
+@bot.message_handler(func=lambda m: m.text and "Return" in m.text)
 def back(message):
     uid = message.from_user.id
     name = message.from_user.first_name
@@ -792,6 +812,11 @@ def back(message):
 # ===== Button handler =====
 @bot.message_handler(func=lambda m: True)
 def handler(message):
+
+    # 🚫 如果是机器人，直接忽略
+    if message.from_user.is_bot:
+        return
+
     uid = message.from_user.id
     name = message.from_user.first_name
     txt = message.text
@@ -823,11 +848,3 @@ if __name__ == "__main__":
         timeout=20,
         long_polling_timeout=20
     )
-
-
-
-
-
-
-
-
