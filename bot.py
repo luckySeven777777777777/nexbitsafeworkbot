@@ -175,6 +175,7 @@ HR_USERS = {
     8453417442,
     7329147658,
     7831581485,
+    8518597751,
 }
 
 # ===== FINDING 用户配置（Telegram user_id）=====
@@ -848,3 +849,4 @@ if __name__ == "__main__":
         timeout=20,
         long_polling_timeout=20
     )
+
