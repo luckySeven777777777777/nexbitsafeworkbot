@@ -400,8 +400,6 @@ def send_late_notice(msg):
         except Exception as e:
             print("❌ send_late_notice failed:", e)
 
-
-# ===== 未打卡提醒（4分钟检测）=====
 # ===== 未打卡提醒（4分钟检测）=====
 MISSED_CHECK_SENT = set()
 
@@ -456,11 +454,13 @@ def check_missing_checkins():
 
                 limit_dt = shift_start_dt + timedelta(minutes=4)
 
-                # 超过4分钟未打卡
+                # ===== 超过4分钟未打卡 =====
                 if now_dt >= limit_dt:
-                # 超过当天23:59不再提醒
-                  if now_dt.hour >= 23:
-                      continue
+
+                    # 超过23:59不提醒
+                    if now_dt.hour >= 23:
+                        continue
+
                     try:
                         chat = bot.get_chat(uid)
                         name = chat.first_name or "User"
