@@ -178,6 +178,8 @@ HR_USERS = {
     8518597751,
     6917597442,
     1934205054,
+    7569556703,
+    5085749014,
 }
 
 # ===== FINDING 用户配置（Telegram user_id）=====
@@ -216,7 +218,8 @@ FINDING_USERS = {
     7300796372,
     7577730904,
     7375446542,
-    5739622987,# finding 员工 2
+    5739622987,
+    8285060003,# finding 员工 2
 }
 SHIFT_RULES = {
     "HR": {
@@ -396,12 +399,96 @@ def send_late_notice(msg):
             )
         except Exception as e:
             print("❌ send_late_notice failed:", e)
+
+
+# ===== 未打卡提醒（4分钟检测）=====
+# ===== 未打卡提醒（4分钟检测）=====
+MISSED_CHECK_SENT = set()
+
+def check_missing_checkins():
+
+    while True:
+        try:
+            now_dt = now()
+            today = now_dt.date()
+
+            for uid in REGISTERED_USERS:
+
+                key = (uid, today)
+
+                # 今天已经提醒过
+                if key in MISSED_CHECK_SENT:
+                    continue
+
+                # ===== 已经上班（内存）=====
+                if uid in CHECK_IN_STATUS:
+                    continue
+
+                # ===== JSON 已经打卡（服务器重启保护）=====
+                month_key = today.strftime("%Y-%m")
+                date_key = today.strftime("%Y-%m-%d")
+
+                if (
+                    uid in ATTENDANCE
+                    and month_key in ATTENDANCE[uid]
+                    and date_key in ATTENDANCE[uid][month_key]
+                ):
+                    rec = ATTENDANCE[uid][month_key][date_key]
+
+                    if (
+                        rec.get("checkin")
+                        or rec.get("morning_checkin")
+                        or rec.get("night_checkin")
+                    ):
+                        continue
+
+                shift = get_shift_standard(now_dt, uid)
+                if not shift:
+                    continue
+
+                start_time = shift["start"]
+
+                shift_start_dt = datetime.combine(
+                    today,
+                    start_time,
+                    tzinfo=LOCAL_TZ
+                )
+
+                limit_dt = shift_start_dt + timedelta(minutes=4)
+
+                # 超过4分钟未打卡
+                if now_dt >= limit_dt:
+                # 超过当天23:59不再提醒
+                  if now_dt.hour >= 23:
+                      continue
+                    try:
+                        chat = bot.get_chat(uid)
+                        name = chat.first_name or "User"
+
+                        notice = (
+                            f"<a href='tg://user?id={uid}'>"
+                            f"{name}</a> "
+                            f"Today did not check in for work ⚠️"
+                        )
+
+                        send_late_notice(notice)
+
+                        MISSED_CHECK_SENT.add(key)
+
+                    except Exception as e:
+                        print("missing checkin error:", e)
+
+        except Exception as e:
+            print("❌ missing checkin loop error:", e)
+
+        # 每30秒检测
+        threading.Event().wait(30)
+
+# ===== Safe Private Message =====
 def safe_pm(uid, text, reply_markup=None):
     try:
-        # 🔎 先检查这个ID是不是机器人
         chat = bot.get_chat(uid)
 
-        # 如果是机器人，直接跳过
         if getattr(chat, "is_bot", False):
             print(f"🚫 Skipping bot user {uid}")
             return False
@@ -412,7 +499,6 @@ def safe_pm(uid, text, reply_markup=None):
     except Exception as e:
         error_text = str(e)
 
-        # 🚫 如果是 403 或被拉黑，自动忽略
         if "403" in error_text or "bot was blocked" in error_text:
             print(f"🚫 User {uid} blocked bot or is invalid.")
             return False
@@ -433,6 +519,7 @@ def start(message):
     # ✅ 第一次注册
     if uid not in REGISTERED_USERS:
         REGISTERED_USERS.add(uid)
+        save_registered_users()   # ✅ 必须加这个
 
         user_sessions.setdefault(uid, {
             "Eating": 0,
@@ -855,12 +942,19 @@ def handler(message):
 if __name__ == "__main__":
     load_attendance()
     load_registered_users()
+
+    # ✅ 启动未打卡检测线程
+    threading.Thread(
+        target=check_missing_checkins,
+        daemon=True
+    ).start()
+
     print("🤖 Bot started (JSON persistence)")
+
     bot.infinity_polling(
         skip_pending=True,
         timeout=20,
         long_polling_timeout=20
     )
-
 
 
