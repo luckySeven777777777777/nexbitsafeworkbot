@@ -406,122 +406,114 @@ def send_late_notice(msg):
 MISSED_CHECK_SENT = set()
 
 def check_missing_checkins():
-
     while True:
         try:
             now_dt = now()
             today = now_dt.date()
 
-            # 所有员工（固定名单）
-            all_staff = HR_USERS | FINDING_USERS
+            # 所有注册用户
+            all_staff = REGISTERED_USERS
 
             for uid in all_staff:
 
                 month_key = today.strftime("%Y-%m")
                 date_key = today.strftime("%Y-%m-%d")
 
-                rec = {}
-                if uid in ATTENDANCE and month_key in ATTENDANCE[uid]:
-                    rec = ATTENDANCE[uid][month_key].get(date_key, {})
+                rec = ATTENDANCE.get(uid, {}).get(month_key, {}).get(date_key, {})
 
                 # =========================
-                # HR 检测（09:00）
+                # HR 检测
                 # =========================
                 if uid in HR_USERS:
-
-                    shift_start = datetime.combine(
-                        today, time(9, 0), tzinfo=LOCAL_TZ
-                    )
+                    shift_start = datetime.combine(today, time(9, 0), tzinfo=LOCAL_TZ)
                     limit_dt = shift_start + timedelta(minutes=4)
-
                     key = (uid, "HR_DAY", today)
+                    window_end = limit_dt + timedelta(seconds=60)
 
-                    if now_dt >= limit_dt and key not in MISSED_CHECK_SENT:
-
+                    if limit_dt <= now_dt < window_end and key not in MISSED_CHECK_SENT:
                         if not rec.get("checkin"):
-
                             try:
                                 chat = bot.get_chat(uid)
                                 name = chat.first_name or "User"
-
-                                notice = (
-                                    f"<a href='tg://user?id={uid}'>"
-                                    f"{name}</a> HR 未打卡 ⚠️"
-                                )
-
+                                notice = f"<a href='tg://user?id={uid}'>{name}</a> HR 未打卡 ⚠️"
                                 send_late_notice(notice)
                                 MISSED_CHECK_SENT.add(key)
-
                             except Exception as e:
                                 print("HR missing error:", e)
+                    continue  # HR 检查完跳过后续
 
                 # =========================
-                # FINDING 早班（07:00）
+                # FINDING 检测
                 # =========================
                 if uid in FINDING_USERS:
-
-                    morning_start = datetime.combine(
-                        today, time(7, 0), tzinfo=LOCAL_TZ
-                    )
+                    # 早班
+                    morning_start = datetime.combine(today, time(7, 0), tzinfo=LOCAL_TZ)
                     morning_limit = morning_start + timedelta(minutes=4)
-
                     key_m = (uid, "FINDING_MORNING", today)
-
-                    if now_dt >= morning_limit and key_m not in MISSED_CHECK_SENT:
-
+                    if morning_limit <= now_dt < morning_limit + timedelta(seconds=60) and key_m not in MISSED_CHECK_SENT:
                         if not rec.get("morning_checkin"):
-
                             try:
                                 chat = bot.get_chat(uid)
                                 name = chat.first_name or "User"
-
-                                notice = (
-                                    f"<a href='tg://user?id={uid}'>"
-                                    f"{name}</a> FINDING 早班未打卡 ⚠️"
-                                )
-
+                                notice = f"<a href='tg://user?id={uid}'>{name}</a> FINDING 早班未打卡 ⚠️"
                                 send_late_notice(notice)
                                 MISSED_CHECK_SENT.add(key_m)
-
                             except Exception as e:
                                 print("FINDING morning error:", e)
 
-                    # =========================
-                    # FINDING 晚班（19:00）
-                    # =========================
-                    night_start = datetime.combine(
-                        today, time(19, 0), tzinfo=LOCAL_TZ
-                    )
+                    # 晚班
+                    night_start = datetime.combine(today, time(19, 0), tzinfo=LOCAL_TZ)
                     night_limit = night_start + timedelta(minutes=4)
-
                     key_n = (uid, "FINDING_NIGHT", today)
-
-                    if now_dt >= night_limit and key_n not in MISSED_CHECK_SENT:
-
+                    if night_limit <= now_dt < night_limit + timedelta(seconds=60) and key_n not in MISSED_CHECK_SENT:
                         if not rec.get("night_checkin"):
-
                             try:
                                 chat = bot.get_chat(uid)
                                 name = chat.first_name or "User"
-
-                                notice = (
-                                    f"<a href='tg://user?id={uid}'>"
-                                    f"{name}</a> FINDING 晚班未打卡 ⚠️"
-                                )
-
+                                notice = f"<a href='tg://user?id={uid}'>{name}</a> FINDING 晚班未打卡 ⚠️"
                                 send_late_notice(notice)
                                 MISSED_CHECK_SENT.add(key_n)
-
                             except Exception as e:
                                 print("FINDING night error:", e)
+                    continue  # FINDING 检查完跳过后续
+
+                # =========================
+                # PROMO 检测（默认：非 HR / FINDING 用户）
+                # =========================
+                # 早班 06:00
+                promo_m_start = datetime.combine(today, time(6, 0), tzinfo=LOCAL_TZ)
+                promo_m_limit = promo_m_start + timedelta(minutes=4)
+                key_pm = (uid, "PROMO_MORNING", today)
+                if promo_m_limit <= now_dt < promo_m_limit + timedelta(seconds=60) and key_pm not in MISSED_CHECK_SENT:
+                    if not rec.get("morning_checkin"):
+                        try:
+                            chat = bot.get_chat(uid)
+                            name = chat.first_name or "User"
+                            notice = f"<a href='tg://user?id={uid}'>{name}</a> PROMO 早班未打卡 ⚠️"
+                            send_late_notice(notice)
+                            MISSED_CHECK_SENT.add(key_pm)
+                        except Exception as e:
+                            print("PROMO morning error:", e)
+
+                # 晚班 19:00
+                promo_n_start = datetime.combine(today, time(19, 0), tzinfo=LOCAL_TZ)
+                promo_n_limit = promo_n_start + timedelta(minutes=4)
+                key_pn = (uid, "PROMO_NIGHT", today)
+                if promo_n_limit <= now_dt < promo_n_limit + timedelta(seconds=60) and key_pn not in MISSED_CHECK_SENT:
+                    if not rec.get("night_checkin"):
+                        try:
+                            chat = bot.get_chat(uid)
+                            name = chat.first_name or "User"
+                            notice = f"<a href='tg://user?id={uid}'>{name}</a> PROMO 晚班未打卡 ⚠️"
+                            send_late_notice(notice)
+                            MISSED_CHECK_SENT.add(key_pn)
+                        except Exception as e:
+                            print("PROMO night error:", e)
 
         except Exception as e:
             print("❌ missing checkin loop error:", e)
 
-        # 每30秒检测一次
-        threading.Event().wait(30)
-
-# ===== Safe Private Message =====
+        threading.Event().wait(30)# ===== Safe Private Message =====
 def safe_pm(uid, text, reply_markup=None):
     try:
         chat = bot.get_chat(uid)
