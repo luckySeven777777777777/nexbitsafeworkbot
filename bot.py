@@ -203,7 +203,7 @@ FINDING_USERS = {
     7450025463,
     5541863981,
     7450025463,
-    1981387708,# finding 员工 2
+    6445144354,# finding 员工 2
 }
 SHIFT_RULES = {
     "HR": {
@@ -967,6 +967,7 @@ if __name__ == "__main__":
         timeout=20,
         long_polling_timeout=20
     )
+
 
 
 
