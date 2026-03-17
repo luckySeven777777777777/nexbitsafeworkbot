@@ -169,40 +169,64 @@ def ordinal(n):
     return f"{n}{ {1:'st', 2:'nd', 3:'rd'}.get(n % 10, 'th') }"
 # ===== HR 用户配置（只填 HR 的 Telegram user_id）=====
 HR_USERS = {
-    8453417442,
-    8285060003,
-    7329147658,
-    7569556703,
+    6725112018,
+    6478034136,
     8005614048,
-    1934205054,
+    8453417442,
+    7329147658,
+    7831581485,
+    8518597751,
     6917597442,
-    7667549870,
+    1934205054,
+    7569556703,
+    5085749014,
+    8170698622,
 }
 
 # ===== FINDING 用户配置（Telegram user_id）=====
 FINDING_USERS = {
+    8525517116,   # finding 员工 1
     5545647021,
+    5706894394,
+    1791318040,
+    6683820548, 
+    7964956372,
+    8437762768, 
     5251501400,
-    6683820548,
+    8547596973,
+    6552916820,
+    2031414228,
+    7444326851,
+    1767649471,
     1966382979,
+    6300562515,
+    7304897866,
+    8360579734,
+    7662045618,
+    7901983666,
     7406648934,
-    7577730904,
+    6375148866,
+    6263934190,
+    7831581485,
+    8518875753,
     2115532359,
-    7300796372,
-    7292787852,
+    8450110014,
+    6039518746,
+    7713260105,
+    6509536230,
     8591427572,
+    7300796372,
+    7577730904,
     7375446542,
     5739622987,
-    8504004122,
+    8285060003,
     1727971756,
-    7620438477,
     5641863981,
-    5169844690,
-    6936108983, 
-    7450025463,
-    5541863981,
-    7450025463,
-    6445144354,# finding 员工 2
+    7620438477,
+    8036797443,
+    7292787852,
+    6801881658,
+    8504004122, # finding 员工 2
 }
 SHIFT_RULES = {
     "HR": {
@@ -567,11 +591,9 @@ def attendance_report(message):
     month_days, total_days = get_attendance_summary(uid)
 
     bot.reply_to(
-        message,
-        f"📊 考勤统计\n"
-        f"🗓️ 本月已正常上班：{month_days} 天\n"
-        f"📈 累计正常上班：{total_days} 天"
-    )
+    message,
+    "📊 考勤统计功能已关闭"
+)
 
 
 # ===== Start Activity =====
@@ -848,10 +870,7 @@ def check_out(uid, name):
         f"📅 Check-in time: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
         f"📅 Check-out time: {end_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
         f"⏰ Work duration: {hours}h {minutes}m {seconds}s\n"
-        f"{status_text}\n\n"
-        f"📊 考勤统计：\n"
-        f"🗓️ 本月已正常上班：{month_days} 天\n"
-        f"📊 累计正常上班：{total_days} 天"
+        f"{status_text}"
     )
 
     safe_pm(uid, msg, reply_markup=main_keyboard())
@@ -863,10 +882,8 @@ def check_out(uid, name):
         f"📅 Check-in time: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
         f"📅 Check-out time: {end_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
         f"⏰ Work duration: {hours}h {minutes}m {seconds}s\n"
-        f"{status_text}\n\n"
-        f"📊 考勤统计：\n"
-        f"🗓️ 本月已正常上班：{month_days} 天\n"
-        f"📊 累计正常上班：{total_days} 天"
+        f"{status_text}"
+      
     )
 
     # ===== 清除状态 =====
@@ -966,12 +983,5 @@ if __name__ == "__main__":
         timeout=20,
         long_polling_timeout=20
     )
-
-
-
-
-
-
-
 
 
