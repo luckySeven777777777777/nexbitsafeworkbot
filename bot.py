@@ -186,50 +186,21 @@ HR_USERS = {
 
 # ===== FINDING 用户配置（Telegram user_id）=====
 FINDING_USERS = {
-    8525517116,   # finding 员工 1
     5545647021,
-    5706894394,
-    1791318040,
-    6683820548, 
-    7964956372,
-    8437762768, 
     5251501400,
-    8547596973,
-    6552916820,
-    2031414228,
-    7444326851,
-    1767649471,
     1966382979,
-    6300562515,
-    7304897866,
-    8360579734,
-    7662045618,
-    7901983666,
     7406648934,
-    6375148866,
-    6263934190,
-    7831581485,
-    8518875753,
     2115532359,
-    8450110014,
-    6039518746,
-    7713260105,
-    6509536230,
-    8591427572,
     7300796372,
-    7577730904,
+    8591427572,
     7375446542,
-    5739622987,
-    8285060003,
     1727971756,
-    5641863981,
-    7620438477,
-    8036797443,
-    7292787852,
-    6801881658,
-    8504004122,
-    7450025463,
-    5541863981,# finding 员工 2
+    7450025463,# finding 员工 2
+}
+# ===== CUSTOM NIGHT 用户 =====
+CUSTOM_NIGHT_USERS = {
+    6863315227,
+    2018656742,
 }
 SHIFT_RULES = {
     "HR": {
@@ -323,8 +294,19 @@ def get_attendance_summary(uid):
     return len(month_days), len(total_days)
 
 
+
 def get_shift_standard(dt, uid):
     t = dt.time()
+
+    # ===== CUSTOM NIGHT =====
+    if uid in CUSTOM_NIGHT_USERS:
+        return {
+            "role": "CUSTOM",
+            "shift": "NIGHT",
+            "start": time(20, 30),   # 晚上8:30
+            "end": time(10, 30),     # 次日10:30
+            "cross_day": True
+        }
 
     # ===== HR =====
     if uid in HR_USERS:
@@ -448,7 +430,7 @@ def check_missing_checkins():
                                 MISSED_CHECK_SENT.add(key)
                             except Exception as e:
                                 print("HR missing error:", e)
-                    continue  # HR 检查完跳过后续
+                    continue
 
                 # =========================
                 # FINDING 检测
@@ -458,6 +440,7 @@ def check_missing_checkins():
                     morning_start = datetime.combine(today, time(7, 0), tzinfo=LOCAL_TZ)
                     morning_limit = morning_start + timedelta(minutes=4)
                     key_m = (uid, "FINDING_MORNING", today)
+
                     if morning_limit <= now_dt < morning_limit + timedelta(seconds=60) and key_m not in MISSED_CHECK_SENT:
                         if not rec.get("morning_checkin"):
                             try:
@@ -473,6 +456,7 @@ def check_missing_checkins():
                     night_start = datetime.combine(today, time(19, 0), tzinfo=LOCAL_TZ)
                     night_limit = night_start + timedelta(minutes=4)
                     key_n = (uid, "FINDING_NIGHT", today)
+
                     if night_limit <= now_dt < night_limit + timedelta(seconds=60) and key_n not in MISSED_CHECK_SENT:
                         if not rec.get("night_checkin"):
                             try:
@@ -483,15 +467,38 @@ def check_missing_checkins():
                                 MISSED_CHECK_SENT.add(key_n)
                             except Exception as e:
                                 print("FINDING night error:", e)
-                    continue  # FINDING 检查完跳过后续
+
+                    continue
 
                 # =========================
-                # PROMO 检测（默认：非 HR / FINDING 用户）
+                # ✅ CUSTOM NIGHT 检测（正确位置）
                 # =========================
-                # 早班 06:00
+                if uid in CUSTOM_NIGHT_USERS:
+                    night_start = datetime.combine(today, time(20, 30), tzinfo=LOCAL_TZ)
+                    night_limit = night_start + timedelta(minutes=4)
+                    key_c = (uid, "CUSTOM_NIGHT", today)
+
+                    if night_limit <= now_dt < night_limit + timedelta(seconds=60) and key_c not in MISSED_CHECK_SENT:
+                        if not rec.get("night_checkin"):
+                            try:
+                                chat = bot.get_chat(uid)
+                                name = chat.first_name or "User"
+                                notice = f"<a href='tg://user?id={uid}'>{name}</a> CUSTOM 夜班未打卡 ⚠️"
+                                send_late_notice(notice)
+                                MISSED_CHECK_SENT.add(key_c)
+                            except Exception as e:
+                                print("CUSTOM night error:", e)
+
+                    continue
+
+                # =========================
+                # PROMO 检测（默认）
+                # =========================
+                # 早班
                 promo_m_start = datetime.combine(today, time(6, 0), tzinfo=LOCAL_TZ)
                 promo_m_limit = promo_m_start + timedelta(minutes=4)
                 key_pm = (uid, "PROMO_MORNING", today)
+
                 if promo_m_limit <= now_dt < promo_m_limit + timedelta(seconds=60) and key_pm not in MISSED_CHECK_SENT:
                     if not rec.get("morning_checkin"):
                         try:
@@ -503,10 +510,11 @@ def check_missing_checkins():
                         except Exception as e:
                             print("PROMO morning error:", e)
 
-                # 晚班 19:00
+                # 晚班
                 promo_n_start = datetime.combine(today, time(19, 0), tzinfo=LOCAL_TZ)
                 promo_n_limit = promo_n_start + timedelta(minutes=4)
                 key_pn = (uid, "PROMO_NIGHT", today)
+
                 if promo_n_limit <= now_dt < promo_n_limit + timedelta(seconds=60) and key_pn not in MISSED_CHECK_SENT:
                     if not rec.get("night_checkin"):
                         try:
@@ -521,7 +529,9 @@ def check_missing_checkins():
         except Exception as e:
             print("❌ missing checkin loop error:", e)
 
-        threading.Event().wait(30)# ===== Safe Private Message =====
+        threading.Event().wait(30)
+
+# ===== Safe Private Message =====
 def safe_pm(uid, text, reply_markup=None):
     try:
         chat = bot.get_chat(uid)
@@ -694,7 +704,7 @@ def check_in(uid, name):
 
     # ===== finding / promo 凌晨算前一天 =====
     logical_date = now_dt.date()
-    if shift_info["role"] in ("FINDING", "PROMO") and now_dt.time() < time(2, 0):
+    if shift_info["role"] in ("FINDING", "PROMO", "CUSTOM") and now_dt.time() < time(12, 0):
         logical_date -= timedelta(days=1)
 
     # ===== 迟到计算 =====
@@ -770,6 +780,7 @@ def check_in(uid, name):
     )
 
 
+
 def check_out(uid, name):
     if uid not in CHECK_IN_STATUS:
         safe_pm(uid, "❌ You must check in first.")
@@ -781,33 +792,44 @@ def check_out(uid, name):
     shift_info = record["shift"]
 
     end_dt = now()
- 
+
     # ===== 夜班跨天：凌晨算前一天 =====
-    if shift_info["role"] in ("FINDING", "PROMO") and shift_info.get("shift") == "NIGHT":
+    if shift_info["role"] in ("FINDING", "PROMO", "CUSTOM") and shift_info.get("shift") == "NIGHT":
         if end_dt.time() < time(2, 0):
             logical_date -= timedelta(days=1)
 
     # ===== 早退计算 =====
     early_leave_minutes = 0
 
-    # ===== 夜班特殊规则（FINDING / PROMO）=====
-    if shift_info.get("cross_day") and shift_info["role"] in ("FINDING", "PROMO"):
+    # ===== 夜班特殊规则 =====
+    if shift_info.get("cross_day") and shift_info["role"] in ("FINDING", "PROMO", "CUSTOM"):
 
-        # 👉 只在 19:00–23:59 之间下班才算早退
-        if time(19, 0) <= end_dt.time() <= time(23, 59, 59):
+        if shift_info["role"] == "CUSTOM":
             shift_end_dt = datetime.combine(
-                logical_date,
-                time(23, 59, 59),
+                logical_date + timedelta(days=1),
+                time(10, 30),
                 tzinfo=LOCAL_TZ
             )
             if end_dt < shift_end_dt:
                 early_leave_minutes = int(
                     (shift_end_dt - end_dt).total_seconds() // 60
                 )
-        else:
-            # 00:00–06:00 下班 → 不算早退
-            early_leave_minutes = 0
 
+        else:
+            if time(19, 0) <= end_dt.time() <= time(23, 59, 59):
+                shift_end_dt = datetime.combine(
+                    logical_date,
+                    time(23, 59, 59),
+                    tzinfo=LOCAL_TZ
+                )
+                if end_dt < shift_end_dt:
+                    early_leave_minutes = int(
+                        (shift_end_dt - end_dt).total_seconds() // 60
+                    )
+            else:
+                early_leave_minutes = 0
+
+    # ===== 普通班次 =====
     else:
         if shift_info.get("cross_day"):
             shift_end_dt = datetime.combine(
@@ -826,8 +848,7 @@ def check_out(uid, name):
             early_leave_minutes = int(
                 (shift_end_dt - end_dt).total_seconds() // 60
             )
-
-    # ===== 计算工时 =====
+# ===== 计算工时 =====
     diff = end_dt - start_dt
     total_seconds = int(diff.total_seconds())
     hours = total_seconds // 3600
