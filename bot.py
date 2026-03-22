@@ -715,29 +715,28 @@ def check_in(uid, name):
     ):
         logical_date -= timedelta(days=1)
 
-    # ===== 迟到计算 =====
-    late_minutes = 0
-
+# ===== 1. 确定基准上班时间 =====
     shift_start_dt = datetime.combine(
         logical_date,
         shift_info["start"],
         tzinfo=LOCAL_TZ
     )
 
-    # 夜班跨天修正
-    if shift_info.get("cross_day") and now_dt < shift_start_dt:
-        shift_start_dt -= timedelta(days=1)
+    # ===== 2. 迟到逻辑核心计算 =====
+    late_minutes = 0
+    
+    # 如果当前打卡时间比排班开始时间早，或者是准点
+    if now_dt <= shift_start_dt:
+        late_minutes = 0
+    else:
+        # 只有比排班时间晚，才计算差值
+        late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
 
-    # ===== ✅ 修复缩进问题（关键）=====
+    # ===== 3. 特殊过滤（可选） =====
+    # 如果是 FINDING 或 PROMO，再次确保提前打卡不会产生负数或异常
     if shift_info["role"] in ("FINDING", "PROMO"):
         if now_dt.time() < shift_info["start"]:
             late_minutes = 0
-        elif now_dt > shift_start_dt:
-            late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
-    else:
-        if now_dt > shift_start_dt:
-            late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
-
     # ===== 记录状态 =====
     CHECK_IN_STATUS[uid] = {
         "time": now_dt,
