@@ -420,7 +420,7 @@ def check_missing_checkins():
                     key = (uid, "HR_DAY", today)
                     window_end = limit_dt + timedelta(seconds=60)
 
-                    if limit_dt <= now_dt < window_end and key not in MISSED_CHECK_SENT:
+                    if now_dt >= limit_dt and key not in MISSED_CHECK_SENT:
                         if not rec.get("checkin"):
                             try:
                                 chat = bot.get_chat(uid)
@@ -479,7 +479,7 @@ def check_missing_checkins():
                     key_c = (uid, "CUSTOM_NIGHT", today)
 
                     if night_limit <= now_dt < night_limit + timedelta(seconds=60) and key_c not in MISSED_CHECK_SENT:
-                        if not rec.get("night_checkin"):
+                        if not rec.get("checkin"):
                             try:
                                 chat = bot.get_chat(uid)
                                 name = chat.first_name or "User"
@@ -690,31 +690,45 @@ def check_in(uid, name):
         safe_pm(uid, "⛔ 当前不在你的上班班次时间内")
         return
 
-    # ===== ✅ 夜班提前打卡修复 =====
-    if shift_info["role"] in ("FINDING", "PROMO"):
+    # ===== 强制下午 → 夜班 =====
+    if shift_info["role"] in ("FINDING", "PROMO", "CUSTOM"):
         night_start = time(19, 0)
+
+        if shift_info["role"] == "CUSTOM":
+            night_start = time(20, 30)
+
         if time(12, 0) <= now_dt.time() < night_start:
             shift_info = {
                 "role": shift_info["role"],
                 "shift": "NIGHT",
                 "start": night_start,
-                "end": time(2, 0),
+                "end": time(10, 30) if shift_info["role"] == "CUSTOM" else time(2, 0),
                 "cross_day": True
             }
 
-    # ===== finding / promo 凌晨算前一天 =====
+    # ===== 夜班凌晨算前一天 =====
     logical_date = now_dt.date()
-    if shift_info["role"] in ("FINDING", "PROMO", "CUSTOM") and now_dt.time() < time(12, 0):
+    if (
+        shift_info["role"] in ("FINDING", "PROMO", "CUSTOM")
+        and shift_info.get("shift") == "NIGHT"
+        and now_dt.time() < time(3, 0)
+    ):
         logical_date -= timedelta(days=1)
 
     # ===== 迟到计算 =====
     late_minutes = 0
+
     shift_start_dt = datetime.combine(
         logical_date,
         shift_info["start"],
         tzinfo=LOCAL_TZ
     )
 
+    # 夜班跨天修正
+    if shift_info.get("cross_day") and now_dt < shift_start_dt:
+        shift_start_dt -= timedelta(days=1)
+
+    # ===== ✅ 修复缩进问题（关键）=====
     if shift_info["role"] in ("FINDING", "PROMO"):
         if now_dt.time() < shift_info["start"]:
             late_minutes = 0
@@ -724,6 +738,7 @@ def check_in(uid, name):
         if now_dt > shift_start_dt:
             late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
 
+    # ===== 记录状态 =====
     CHECK_IN_STATUS[uid] = {
         "time": now_dt,
         "logical_date": logical_date,
@@ -733,34 +748,33 @@ def check_in(uid, name):
     month_key = logical_date.strftime("%Y-%m")
     date_key = logical_date.strftime("%Y-%m-%d")
 
+    # ===== ✅ 修复 KeyError（关键）=====
+    ATTENDANCE[uid].setdefault(month_key, {})
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
     day_rec = ATTENDANCE[uid][month_key][date_key]
 
-    # ===== FINDING / PROMO：区分早班 / 晚班 =====
+    # ===== 写入打卡 =====
     if shift_info["role"] in ("FINDING", "PROMO"):
         if shift_info["shift"] == "MORNING":
             day_rec["morning_checkin"] = now_dt
         elif shift_info["shift"] == "NIGHT":
             day_rec["night_checkin"] = now_dt
     else:
-        # ===== HR =====
         day_rec["checkin"] = now_dt
 
-    # ✅【关键修复】迟到只增不减（⚠️ 必须在 if/else 外）
+    # ===== 迟到记录 =====
     old_late = day_rec.get("late_minutes", 0)
     day_rec["late_minutes"] = max(old_late, late_minutes)
 
-    # ===== 🚨 迟到 ≥5 分钟 → 发送到通知群 =====
+    # ===== 迟到通知 =====
     if late_minutes >= 5:
         day = logical_date.day
 
-        # HR 不管白天晚上，固定 day
         if shift_info["role"] == "HR":
             period = "day"
         else:
             period = "morning" if shift_info["shift"] == "MORNING" else "night"
 
-        # 自动艾特（用 tg://user?id=UID）
         notice = f"<a href='tg://user?id={uid}'>{name}</a> {day}day {period} ⚠️ late {late_minutes}min"
         send_late_notice(notice)
 
@@ -769,6 +783,7 @@ def check_in(uid, name):
     msg = f"✅ {name} checked in at {now_dt.strftime('%H:%M:%S')}"
     if late_minutes > 0:
         msg += f" ⚠️ Late {late_minutes} min"
+
     send_group(msg)
 
     safe_pm(
@@ -778,7 +793,6 @@ def check_in(uid, name):
         f"⏰ 迟到：{late_minutes} 分钟",
         reply_markup=main_keyboard()
     )
-
 
 
 def check_out(uid, name):
@@ -848,16 +862,18 @@ def check_out(uid, name):
             early_leave_minutes = int(
                 (shift_end_dt - end_dt).total_seconds() // 60
             )
-# ===== 计算工时 =====
+    # ===== 计算工时 =====
     diff = end_dt - start_dt
     total_seconds = int(diff.total_seconds())
     hours = total_seconds // 3600
     minutes = (total_seconds % 3600) // 60
     seconds = total_seconds % 60
 
+    # ✅ 这里开始（必须在函数内部！！）
     month_key = logical_date.strftime("%Y-%m")
     date_key = logical_date.strftime("%Y-%m-%d")
 
+    ATTENDANCE[uid].setdefault(month_key, {})
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
     day_rec = ATTENDANCE[uid][month_key][date_key]
 
