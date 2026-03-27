@@ -196,7 +196,6 @@ FINDING_USERS = {
 }
 # ===== CUSTOM NIGHT 用户 =====
 CUSTOM_NIGHT_USERS = {
-   ,
 }
 SHIFT_RULES = {
     "HR": {
