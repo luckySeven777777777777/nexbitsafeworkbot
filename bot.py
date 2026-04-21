@@ -179,7 +179,6 @@ HR_USERS = {
 
 # ===== FINDING 用户配置（Telegram user_id）=====
 FINDING_USERS = {
-    1966382979,
     7406648934,
     7300796372,
     8591427572,
