@@ -193,7 +193,8 @@ FINDING_USERS = {
     6438074082,
     7891858820,
     8504374246,
-    5968823609,# finding 员工 2
+    5968823609,
+    1966382979,# finding 员工 2
 }
 # ===== CUSTOM NIGHT 用户 =====
 CUSTOM_NIGHT_USERS = {
