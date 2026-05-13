@@ -172,13 +172,12 @@ HR_USERS = {
     6917597442,
     7569556703,
     5186967624,
-    6635424294,
     8183357784,
     7501352060,
     6028186424,
-    2018656742,
+    8750107307,
+    6546169167,
 }
-
 # ===== FINDING 用户配置（Telegram user_id）=====
 FINDING_USERS = {
     7406648934,
@@ -187,7 +186,6 @@ FINDING_USERS = {
     7450025463,
     8248857112,
     7773005580,
-    7661955945,
     7977677975,
     6438074082,
     6438074082,
@@ -196,8 +194,18 @@ FINDING_USERS = {
 }
 # ===== CUSTOM NIGHT 用户 =====
 CUSTOM_NIGHT_USERS = {
-
+    2055027475,
+    8337820899,
+    6863315227,
+    2018656742,
+    6635424294,
+    7794920274,
+    1625231530,
+    7961174070,
+    2094656277,
+    8101295137, # 推广员工 ID
 }
+
 SHIFT_RULES = {
     "HR": {
         "start": time(9, 0),
@@ -205,14 +213,13 @@ SHIFT_RULES = {
     },
     "FINDING": {
         "morning": (time(7, 0), time(12, 0)),
-        "night": (time(19, 0), time(23, 59, 59)),
+        "night": (time(19, 0), time(2, 0)), # 原有的保持不变
     },
-    "PROMO": {
-        "morning": (time(6, 0), time(12, 0)),
-        "night": (time(19, 0), time(23, 59, 59)),
+    "PROMO_NIGHT_NEW": { # 统一定义新的夜班时间
+        "start": time(20, 30),
+        "end": time(9, 30),
     }
 }
-
 # ===== Memory =====
 user_activity = {}
 user_sessions = {}
@@ -290,21 +297,10 @@ def get_attendance_summary(uid):
     return len(month_days), len(total_days)
 
 
-
 def get_shift_standard(dt, uid):
     t = dt.time()
 
-    # ===== CUSTOM NIGHT =====
-    if uid in CUSTOM_NIGHT_USERS:
-        return {
-            "role": "CUSTOM",
-            "shift": "NIGHT",
-            "start": time(20, 30),   # 晚上8:30
-            "end": time(10, 30),     # 次日10:30
-            "cross_day": True
-        }
-
-    # ===== HR =====
+    # ===== 1. HR 用户 (09:00 - 19:00) =====
     if uid in HR_USERS:
         return {
             "role": "HR",
@@ -313,59 +309,22 @@ def get_shift_standard(dt, uid):
             "end": time(19, 0),
         }
 
-    # ===== FINDING =====
+    # ===== 2. FINDING 用户 (早/晚两班) =====
     if uid in FINDING_USERS:
-        # 早班
         if time(7, 0) <= t <= time(12, 0):
-            return {
-                "role": "FINDING",
-                "shift": "MORNING",
-                "start": time(7, 0),
-                "end": time(12, 0),
-            }
-
-        # 晚班（跨天）
+            return {"role": "FINDING", "shift": "MORNING", "start": time(7, 0), "end": time(12, 0)}
         if t >= time(19, 0) or t < time(2, 0):
-            return {
-                "role": "FINDING",
-                "shift": "NIGHT",
-                "start": time(19, 0),
-                "end": time(2, 0),   # 次日 02:00
-                "cross_day": True
-            }
+            return {"role": "FINDING", "shift": "NIGHT", "start": time(19, 0), "end": time(2, 0), "cross_day": True}
+        # 默认早班
+        return {"role": "FINDING", "shift": "MORNING", "start": time(7, 0), "end": time(12, 0)}
 
-        # 提前打卡 → 默认早班
-        return {
-            "role": "FINDING",
-            "shift": "MORNING",
-            "start": time(7, 0),
-            "end": time(12, 0),
-        }
-
-    # ===== PROMO =====
-    if time(6, 0) <= t <= time(12, 0):
-        return {
-            "role": "PROMO",
-            "shift": "MORNING",
-            "start": time(6, 0),
-            "end": time(12, 0),
-        }
-
-    if t >= time(19, 0) or t < time(2, 0):
-        return {
-            "role": "PROMO",
-            "shift": "NIGHT",
-            "start": time(19, 0),
-            "end": time(2, 0),
-            "cross_day": True
-        }
-
-    # 提前打卡 → 默认早班
+    # ===== 3. PROMO & CUSTOM 用户 (统一 20:30 - 09:30) =====
     return {
         "role": "PROMO",
-        "shift": "MORNING",
-        "start": time(6, 0),
-        "end": time(12, 0),
+        "shift": "NIGHT",
+        "start": time(20, 30),   # 晚上 8:30
+        "end": time(9, 30),      # 次日 9:30
+        "cross_day": True
     }
 
 # ===== Send group =====
@@ -387,7 +346,6 @@ def send_late_notice(msg):
             )
         except Exception as e:
             print("❌ send_late_notice failed:", e)
-
 # ===== 未打卡提醒（4分钟检测 - 全自动班次版）=====
 MISSED_CHECK_SENT = set()
 
@@ -396,158 +354,66 @@ def check_missing_checkins():
         try:
             now_dt = now()
             today = now_dt.date()
-
-            # 所有注册用户
             all_staff = REGISTERED_USERS
 
             for uid in all_staff:
-
                 month_key = today.strftime("%Y-%m")
                 date_key = today.strftime("%Y-%m-%d")
-
                 rec = ATTENDANCE.get(uid, {}).get(month_key, {}).get(date_key, {})
 
-                # =========================
-                # HR 检测
-                # =========================
+                # --- A. HR 检测 (09:00 上班 + 4min 提醒) ---
                 if uid in HR_USERS:
-                    shift_start = datetime.combine(today, time(9, 0), tzinfo=LOCAL_TZ)
-                    limit_dt = shift_start + timedelta(minutes=4)
+                    limit_dt = datetime.combine(today, time(9, 4), tzinfo=LOCAL_TZ)
                     key = (uid, "HR_DAY", today)
-                    window_end = limit_dt + timedelta(seconds=60)
-
-                    if now_dt >= limit_dt and key not in MISSED_CHECK_SENT:
+                    if limit_dt <= now_dt < limit_dt + timedelta(seconds=60) and key not in MISSED_CHECK_SENT:
                         if not rec.get("checkin"):
-                            try:
-                                chat = bot.get_chat(uid)
-                                name = chat.first_name or "User"
-                                notice = f"<a href='tg://user?id={uid}'>{name}</a> HR 未打卡 ⚠️"
-                                send_late_notice(notice)
-                                MISSED_CHECK_SENT.add(key)
-                            except Exception as e:
-                                print("HR missing error:", e)
+                            send_late_notice_by_id(uid, "HR")
+                            MISSED_CHECK_SENT.add(key)
                     continue
 
-                # =========================
-                # FINDING 检测
-                # =========================
+                # --- B. FINDING 检测 (07:00 / 19:00 上班 + 4min 提醒) ---
                 if uid in FINDING_USERS:
-                    # 早班
-                    morning_start = datetime.combine(today, time(7, 0), tzinfo=LOCAL_TZ)
-                    morning_limit = morning_start + timedelta(minutes=4)
-                    key_m = (uid, "FINDING_MORNING", today)
-
-                    if morning_limit <= now_dt < morning_limit + timedelta(seconds=60) and key_m not in MISSED_CHECK_SENT:
+                    # 早班 07:04
+                    m_limit = datetime.combine(today, time(7, 4), tzinfo=LOCAL_TZ)
+                    key_m = (uid, "FINDING_M", today)
+                    if m_limit <= now_dt < m_limit + timedelta(seconds=60) and key_m not in MISSED_CHECK_SENT:
                         if not rec.get("morning_checkin"):
-                            try:
-                                chat = bot.get_chat(uid)
-                                name = chat.first_name or "User"
-                                notice = f"<a href='tg://user?id={uid}'>{name}</a> FINDING 早班未打卡 ⚠️"
-                                send_late_notice(notice)
-                                MISSED_CHECK_SENT.add(key_m)
-                            except Exception as e:
-                                print("FINDING morning error:", e)
-
-                    # 晚班
-                    night_start = datetime.combine(today, time(19, 0), tzinfo=LOCAL_TZ)
-                    night_limit = night_start + timedelta(minutes=4)
-                    key_n = (uid, "FINDING_NIGHT", today)
-
-                    if night_limit <= now_dt < night_limit + timedelta(seconds=60) and key_n not in MISSED_CHECK_SENT:
+                            send_late_notice_by_id(uid, "FINDING 早班")
+                            MISSED_CHECK_SENT.add(key_m)
+                    
+                    # 晚班 19:04
+                    n_limit = datetime.combine(today, time(19, 4), tzinfo=LOCAL_TZ)
+                    key_n = (uid, "FINDING_N", today)
+                    if n_limit <= now_dt < n_limit + timedelta(seconds=60) and key_n not in MISSED_CHECK_SENT:
                         if not rec.get("night_checkin"):
-                            try:
-                                chat = bot.get_chat(uid)
-                                name = chat.first_name or "User"
-                                notice = f"<a href='tg://user?id={uid}'>{name}</a> FINDING 晚班未打卡 ⚠️"
-                                send_late_notice(notice)
-                                MISSED_CHECK_SENT.add(key_n)
-                            except Exception as e:
-                                print("FINDING night error:", e)
-
+                            send_late_notice_by_id(uid, "FINDING 晚班")
+                            MISSED_CHECK_SENT.add(key_n)
                     continue
 
-                # =========================
-                # ✅ CUSTOM NIGHT 检测（正确位置）
-                # =========================
-                if uid in CUSTOM_NIGHT_USERS:
-                    night_start = datetime.combine(today, time(20, 30), tzinfo=LOCAL_TZ)
-                    night_limit = night_start + timedelta(minutes=4)
-                    key_c = (uid, "CUSTOM_NIGHT", today)
-
-                    if night_limit <= now_dt < night_limit + timedelta(seconds=60) and key_c not in MISSED_CHECK_SENT:
-                        if not rec.get("checkin"):
-                            try:
-                                chat = bot.get_chat(uid)
-                                name = chat.first_name or "User"
-                                notice = f"<a href='tg://user?id={uid}'>{name}</a> CUSTOM 夜班未打卡 ⚠️"
-                                send_late_notice(notice)
-                                MISSED_CHECK_SENT.add(key_c)
-                            except Exception as e:
-                                print("CUSTOM night error:", e)
-
-                    continue
-
-                # =========================
-                # PROMO 检测（默认）
-                # =========================
-                # 早班
-                promo_m_start = datetime.combine(today, time(6, 0), tzinfo=LOCAL_TZ)
-                promo_m_limit = promo_m_start + timedelta(minutes=4)
-                key_pm = (uid, "PROMO_MORNING", today)
-
-                if promo_m_limit <= now_dt < promo_m_limit + timedelta(seconds=60) and key_pm not in MISSED_CHECK_SENT:
-                    if not rec.get("morning_checkin"):
-                        try:
-                            chat = bot.get_chat(uid)
-                            name = chat.first_name or "User"
-                            notice = f"<a href='tg://user?id={uid}'>{name}</a> PROMO 早班未打卡 ⚠️"
-                            send_late_notice(notice)
-                            MISSED_CHECK_SENT.add(key_pm)
-                        except Exception as e:
-                            print("PROMO morning error:", e)
-
-                # 晚班
-                promo_n_start = datetime.combine(today, time(19, 0), tzinfo=LOCAL_TZ)
-                promo_n_limit = promo_n_start + timedelta(minutes=4)
-                key_pn = (uid, "PROMO_NIGHT", today)
-
-                if promo_n_limit <= now_dt < promo_n_limit + timedelta(seconds=60) and key_pn not in MISSED_CHECK_SENT:
-                    if not rec.get("night_checkin"):
-                        try:
-                            chat = bot.get_chat(uid)
-                            name = chat.first_name or "User"
-                            notice = f"<a href='tg://user?id={uid}'>{name}</a> PROMO 晚班未打卡 ⚠️"
-                            send_late_notice(notice)
-                            MISSED_CHECK_SENT.add(key_pn)
-                        except Exception as e:
-                            print("PROMO night error:", e)
+                # --- C. PROMO & CUSTOM 检测 (20:30 上班 + 4min 提醒) ---
+                # 排除 HR 和 Finding 后，推广(Promo)统一执行 20:34 检测
+                p_limit = datetime.combine(today, time(20, 34), tzinfo=LOCAL_TZ)
+                key_p = (uid, "PROMO_NIGHT_NEW", today)
+                if p_limit <= now_dt < p_limit + timedelta(seconds=60) and key_p not in MISSED_CHECK_SENT:
+                    if not rec.get("checkin") and not rec.get("night_checkin"):
+                        send_late_notice_by_id(uid, "推广/夜班(20:30)")
+                        MISSED_CHECK_SENT.add(key_p)
 
         except Exception as e:
             print("❌ missing checkin loop error:", e)
 
+        # 每 30 秒检查一次
         threading.Event().wait(30)
 
-# ===== Safe Private Message =====
-def safe_pm(uid, text, reply_markup=None):
+# 辅助通知函数
+def send_late_notice_by_id(uid, role_name):
     try:
         chat = bot.get_chat(uid)
-
-        if getattr(chat, "is_bot", False):
-            print(f"🚫 Skipping bot user {uid}")
-            return False
-
-        bot.send_message(uid, text, reply_markup=reply_markup)
-        return True
-
+        name = chat.first_name or "User"
+        notice = f"<a href='tg://user?id={uid}'>{name}</a> {role_name} 未打卡 ⚠️"
+        send_late_notice(notice)
     except Exception as e:
-        error_text = str(e)
-
-        if "403" in error_text or "bot was blocked" in error_text:
-            print(f"🚫 User {uid} blocked bot or is invalid.")
-            return False
-
-        print(f"⚠️ PM failed for {uid}: {e}")
-        return False
+        print(f"Notice error for {uid}: {e}")
 # ===== /start =====
 @bot.message_handler(commands=["start"])
 def start(message):
@@ -711,29 +577,28 @@ def check_in(uid, name):
     ):
         logical_date -= timedelta(days=1)
 
-    # ===== 迟到计算 =====
-    late_minutes = 0
-
+# ===== 1. 确定基准上班时间 =====
     shift_start_dt = datetime.combine(
         logical_date,
         shift_info["start"],
         tzinfo=LOCAL_TZ
     )
 
-    # 夜班跨天修正
-    if shift_info.get("cross_day") and now_dt < shift_start_dt:
-        shift_start_dt -= timedelta(days=1)
+    # ===== 2. 迟到逻辑核心计算 =====
+    late_minutes = 0
+    
+    # 如果当前打卡时间比排班开始时间早，或者是准点
+    if now_dt <= shift_start_dt:
+        late_minutes = 0
+    else:
+        # 只有比排班时间晚，才计算差值
+        late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
 
-    # ===== ✅ 修复缩进问题（关键）=====
+    # ===== 3. 特殊过滤（可选） =====
+    # 如果是 FINDING 或 PROMO，再次确保提前打卡不会产生负数或异常
     if shift_info["role"] in ("FINDING", "PROMO"):
         if now_dt.time() < shift_info["start"]:
             late_minutes = 0
-        elif now_dt > shift_start_dt:
-            late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
-    else:
-        if now_dt > shift_start_dt:
-            late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
-
     # ===== 记录状态 =====
     CHECK_IN_STATUS[uid] = {
         "time": now_dt,
