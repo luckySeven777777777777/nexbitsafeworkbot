@@ -469,48 +469,86 @@ def back(message):
 
     # 获取活动并清除状态
     act_data = user_activity.pop(uid)
+    start_dt = act_data["start_dt"]
     end_dt = now()
-    # 计算持续时长（分钟）
-    duration = int((end_dt - act_data["start_dt"]).total_seconds() // 60)
+    
+    # 计算时长
+    diff = end_dt - start_dt
+    minutes = int(diff.total_seconds() // 60)
+    seconds = int(diff.total_seconds() % 60)
+    duration_str = f"{minutes}:{seconds:02d}"
+    
+    # 检查是否超时 (ACTIVITY_TIMES 单位是分钟)
+    timeout_flag = minutes >= ACTIVITY_TIMES.get(act_data["act"], 0)
+    warning = " ⚠️" if timeout_flag else ""
+
     act_label = ACTIVITY_LABELS.get(act_data["act"], "Activity")
+    s = user_sessions.get(uid, {})
 
-    # 发送群组通知
-    send_group(
-        f"👤 {uid}+{name} 【Nexbit-Safe】\n"
-        f"🔚 Activity Finished: {act_label}\n"
-        f"⏱ Duration: {duration} min"
+    # ===== 组装您要求的通知格式 =====
+    msg = (
+        f"👤 {name}\n"
+        f"🍽 {s.get('Eating',0)} / {MAX_TIMES['Eating']}  "
+        f"💧 {s.get('ToiletSmall',0)} / {MAX_TIMES['ToiletSmall']}  "
+        f"🚽 {s.get('ToiletLarge',0)} / {MAX_TIMES['ToiletLarge']}  "
+        f"🚬 Smoking: {s.get('Smoking',0)} / {MAX_TIMES['Smoking']}  "
+        f"📝 {s.get('Other',0)} / {MAX_TIMES['Other']}\n\n"
+        f"↩️ Returned\n"
+        f"{act_data['act']}\n"
+        f"Start: {start_dt.strftime('%H:%M:%S')}\n"
+        f"End: {end_dt.strftime('%H:%M:%S')}\n"
+        f"Duration: {duration_str}{warning}"
     )
-    # 私聊确认
-    safe_pm(uid, f"✅ 已回座，本次 {act_label} 耗时 {duration} 分钟。")
 
-# ===== 补全缺失的 [Check Out] 下班功能 =====
+    send_group(msg)
+    safe_pm(uid, f"✅ 已回座，耗时 {duration_str}", reply_markup=main_keyboard())
+   
+# ===== 修复后的 [Check Out] 下班功能 =====
 def check_out(uid, name):
     if uid not in CHECK_IN_STATUS:
         safe_pm(uid, "❌ 您尚未上班打卡，无需下班。")
         return
 
-    # 获取上班信息
-    checkin_info = CHECK_IN_STATUS[uid]
+    # 获取上班信息并从状态中移除
+    checkin_info = CHECK_IN_STATUS.pop(uid)
+    in_time = checkin_info["time"]
     shift_info = checkin_info["shift"]
-    now_dt = now()
+    out_time = now()
     
-    # --- 提前下班警告逻辑 ---
-    # 如果当前时间早于班次结束时间，可以增加警告逻辑
-    shift_end_dt = datetime.combine(now_dt.date(), shift_info["end"], tzinfo=LOCAL_TZ)
-    if shift_info.get("cross_day") and now_dt.time() > time(12, 0):
+    # --- 计算工作时长 ---
+    diff = out_time - in_time
+    hours = diff.seconds // 3600
+    minutes = (diff.seconds % 3600) // 60
+    seconds = diff.seconds % 60
+    duration_str = f"{hours}h {minutes}m {seconds}s"
+
+    # --- 判定准时状态 ---
+    shift_end_dt = datetime.combine(out_time.date(), shift_info["end"], tzinfo=LOCAL_TZ)
+    if shift_info.get("cross_day") and out_time.time() > time(12, 0):
         shift_end_dt += timedelta(days=1)
-        
-    early_leave = 0
-    if now_dt < shift_end_dt:
-        early_leave = int((shift_end_dt - now_dt).total_seconds() // 60)
-        # 这里可以添加发送给管理员的警告
+    
+    status_msg = "✅ On time"
+    if out_time < shift_end_dt:
+        early_leave = int((shift_end_dt - out_time).total_seconds() // 60)
+        status_msg = f"⚠️ Early Leave: {early_leave} min"
 
-    # 清理内存中的状态
-    CHECK_IN_STATUS.pop(uid, None)
-    user_sessions.pop(uid, None) # 下班重置当日活动次数
+    # ===== 组装您要求的详细通知格式 =====
+    # 格式：👤 名字💸+ID【Nexbit-Safe】
+    msg = (
+        f"👤 {name}💸+{uid}【Nexbit-Safe】\n\n"
+        f"✅ Checked out successfully\n"
+        f"📅 Check-in time: {in_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"📅 Check-out time: {out_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"⏰ Work duration: {duration_str}\n"
+        f"{status_msg}"
+    )
 
-    send_group(f"🏠 {name} checked out at {now_dt.strftime('%H:%M:%S')}")
-    safe_pm(uid, f"🏠 下班成功！打卡时间：{now_dt.strftime('%H:%M:%S')}")
+    # 重置当日活动次数
+    user_sessions.pop(uid, None) 
+
+    # 发送群组和私聊通知
+    send_group(msg)
+    safe_pm(uid, f"🏠 下班成功！\n工作时长：{duration_str}", reply_markup=main_keyboard())
 
 # ===== 补充缺失的辅助发送函数 =====
 def safe_pm(uid, text, reply_markup=None):
@@ -590,11 +628,12 @@ def start_activity(uid, name, act):
     safe_pm(uid, f"✅ {activity_name} started")
 
     # ===== countdown 定时器 =====
+# 在 start_activity 函数内部：
     def countdown():
-        if uid not in user_activity:
+        if uid not in user_activity or user_activity[uid]["start_dt"] != start_dt:
             return
-        activity_timeout[uid] = True
-        send_group(f"⏰ {display_name} {activity_name} TIMEOUT ⚠️")
+        # 按照要求格式提示：⏰ ID+名字 【项目名】 动作 TIMEOUT ⚠️
+        send_group(f"⏰ {uid}+{name} 【Nexbit-Safe】 {activity_name} TIMEOUT ⚠️")
 
     threading.Timer(ACTIVITY_TIMES[act] * 60, countdown).start()
 
