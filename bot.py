@@ -4,7 +4,6 @@ DATA_FILE = "attendance.json"
 REGISTER_FILE = "registered_users.json"
 import os
 import threading
-import time as time_module  # 导入标准 time 模块并重命名
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 import telebot
@@ -204,8 +203,8 @@ CUSTOM_NIGHT_USERS = {
     1625231530,
     7961174070,
     2094656277,
-    8101295137,
-    8101295137, # 推广员工 ID
+    8101295137, 
+    8101295137,# 推广员工 ID
 }
 
 SHIFT_RULES = {
@@ -350,127 +349,144 @@ def send_late_notice(msg):
             print("❌ send_late_notice failed:", e)
 # ===== 未打卡提醒（4分钟检测 - 全自动班次版）=====
 MISSED_CHECK_SENT = set()
-# ===== 【新增】用于记录已发送警告的用户，防止重复艾特 =====
-# 格式: { (uid, date): True }
-WARNED_USERS = {}
 
-# ===== 1. 修复：迟到监控（只检测已注册 ID，双群艾特） =====
 def check_missing_checkins():
-    global WARNED_USERS
     while True:
         try:
             now_dt = now()
-            
-            # 核心要求：只遍历 REGISTERED_USERS 列表内的 ID
-            for uid in list(REGISTERED_USERS):
-                # 如果已经打过卡了，跳过
-                if uid in CHECK_IN_STATUS:
-                    continue
-                
-                shift = get_shift_standard(now_dt, uid)
-                if not shift:
-                    continue
-                
-                # 确定逻辑日期（处理跨天）
-                logical_date = now_dt.date()
-                if shift.get("cross_day") and now_dt.time() < time(4, 0):
-                    logical_date -= timedelta(days=1)
-                
-                # 如果该用户今天这个班次已经艾特过了，跳过
-                if (uid, logical_date) in WARNED_USERS:
+            today = now_dt.date()
+            all_staff = REGISTERED_USERS
+
+            for uid in all_staff:
+                month_key = today.strftime("%Y-%m")
+                date_key = today.strftime("%Y-%m-%d")
+                rec = ATTENDANCE.get(uid, {}).get(month_key, {}).get(date_key, {})
+
+                # --- A. HR 检测 (09:00 上班 + 4min 提醒) ---
+                if uid in HR_USERS:
+                    limit_dt = datetime.combine(today, time(9, 4), tzinfo=LOCAL_TZ)
+                    key = (uid, "HR_DAY", today)
+                    if limit_dt <= now_dt < limit_dt + timedelta(seconds=60) and key not in MISSED_CHECK_SENT:
+                        if not rec.get("checkin"):
+                            send_late_notice_by_id(uid, "HR")
+                            MISSED_CHECK_SENT.add(key)
                     continue
 
-                shift_start_dt = datetime.combine(logical_date, shift["start"], tzinfo=LOCAL_TZ)
-                
-                # 【判定】超过上班时间 5 分钟
-                if now_dt > (shift_start_dt + timedelta(minutes=5)):
-                    # 格式化艾特消息
-                    mention_text = (
-                        f"⏰ [Nexbit-Safe 迟到预警]\n\n"
-                        f"👤 人员：[{uid}](tg://user?id={uid})\n"
-                        f"👔 班次：{shift['role']} ({shift['start'].strftime('%H:%M')})\n"
-                        f"⚠️ 状态：迟到已超过 5 分钟，尚未打卡！"
-                    )
+                # --- B. FINDING 检测 (07:00 / 19:00 上班 + 4min 提醒) ---
+                if uid in FINDING_USERS:
+                    # 早班 07:04
+                    m_limit = datetime.combine(today, time(7, 4), tzinfo=LOCAL_TZ)
+                    key_m = (uid, "FINDING_M", today)
+                    if m_limit <= now_dt < m_limit + timedelta(seconds=60) and key_m not in MISSED_CHECK_SENT:
+                        if not rec.get("morning_checkin"):
+                            send_late_notice_by_id(uid, "FINDING 早班")
+                            MISSED_CHECK_SENT.add(key_m)
                     
-                    # 同步发送到两个群
-                    for chat_id in [GROUP_ID, ADMIN_GROUP_ID]:
-                        if chat_id:
-                            try:
-                                bot.send_message(chat_id, mention_text, parse_mode="Markdown")
-                            except: pass
-                    
-                    # 标记已通知
-                    WARNED_USERS[(uid, logical_date)] = True
-                        
+                    # 晚班 19:04
+                    n_limit = datetime.combine(today, time(19, 4), tzinfo=LOCAL_TZ)
+                    key_n = (uid, "FINDING_N", today)
+                    if n_limit <= now_dt < n_limit + timedelta(seconds=60) and key_n not in MISSED_CHECK_SENT:
+                        if not rec.get("night_checkin"):
+                            send_late_notice_by_id(uid, "FINDING 晚班")
+                            MISSED_CHECK_SENT.add(key_n)
+                    continue
+
+                # --- C. PROMO & CUSTOM 检测 (20:30 上班 + 4min 提醒) ---
+                # 排除 HR 和 Finding 后，推广(Promo)统一执行 20:34 检测
+                p_limit = datetime.combine(today, time(20, 34), tzinfo=LOCAL_TZ)
+                key_p = (uid, "PROMO_NIGHT_NEW", today)
+                if p_limit <= now_dt < p_limit + timedelta(seconds=60) and key_p not in MISSED_CHECK_SENT:
+                    if not rec.get("checkin") and not rec.get("night_checkin"):
+                        send_late_notice_by_id(uid, "推广/夜班(20:30)")
+                        MISSED_CHECK_SENT.add(key_p)
+
         except Exception as e:
-            print(f"Monitor Error: {e}")
-        
-        time_module.sleep(30)
+            print("❌ missing checkin loop error:", e)
 
+        # 每 30 秒检查一次
+        threading.Event().wait(30)
 
-# ===== 2. 修复：下班功能（找回详细统计格式） =====
-def check_out(uid, name):
-    if uid not in CHECK_IN_STATUS:
-        safe_pm(uid, "❌ 您尚未上班打卡。")
+# 辅助通知函数
+def send_late_notice_by_id(uid, role_name):
+    try:
+        chat = bot.get_chat(uid)
+        name = chat.first_name or "User"
+        notice = f"<a href='tg://user?id={uid}'>{name}</a> {role_name} 未打卡 ⚠️"
+        send_late_notice(notice)
+    except Exception as e:
+        print(f"Notice error for {uid}: {e}")
+# ===== /start =====
+@bot.message_handler(commands=["start"])
+def start(message):
+
+    # 🚫 如果是机器人，直接忽略
+    if message.from_user.is_bot:
         return
 
-    # 提取上班信息并移除状态
-    checkin_info = CHECK_IN_STATUS.pop(uid)
-    in_time = checkin_info["time"]
-    shift_info = checkin_info["shift"]
-    out_time = now()
-    
-    # 计算精确工作时长
-    diff = out_time - in_time
-    h, rem = divmod(int(diff.total_seconds()), 3600)
-    m, s = divmod(rem, 60)
-    duration_str = f"{h}h {m}m {s}s"
+    uid = message.from_user.id
+    name = message.from_user.first_name
 
-    # 判定准时/早退
-    shift_end_dt = datetime.combine(out_time.date(), shift_info["end"], tzinfo=LOCAL_TZ)
-    if shift_info.get("cross_day") and out_time.time() > time(12, 0):
-        shift_end_dt += timedelta(days=1)
-    
-    status_msg = "✅ On time"
-    if out_time < shift_end_dt:
-        early_min = int((shift_end_dt - out_time).total_seconds() // 60)
-        status_msg = f"⚠️ Early Leave: {early_min} min"
+    # ✅ 第一次注册
+    if uid not in REGISTERED_USERS:
+        REGISTERED_USERS.add(uid)
+        save_registered_users()   # ✅ 必须加这个
 
-    # 组装你要求的详细通知格式
-    msg = (
-        f"👤 {name}💸+{uid}【Nexbit-Safe】\n\n"
-        f"✅ Checked out successfully\n"
-        f"📅 Check-in time: {in_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"📅 Check-out time: {out_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"⏰ Work duration: {duration_str}\n"
-        f"{status_msg}"
-    )
+        user_sessions.setdefault(uid, {
+            "Eating": 0,
+            "ToiletLarge": 0,
+            "ToiletSmall": 0,
+            "Smoking": 0,
+            "Other": 0,
+        })
+        user_logs.setdefault(uid, [])
 
-    user_sessions.pop(uid, None) # 重置次数
-    send_group(msg)
-    safe_pm(uid, f"🏠 下班成功！\n工作时长：{duration_str}", reply_markup=main_keyboard())
+        bot.send_message(
+            message.chat.id,
+            "✅ Registration successful. No need to click again in the future. /start\n\n"
+            + stats_text(uid),
+            reply_markup=main_keyboard()
+        )
+    else:
+        # ✅ 已注册，只提示 + 显示上班状态
+        status = (
+            f"🟢 已上班：{CHECK_IN_STATUS[uid]['time'].strftime('%H:%M:%S')}"
+            if uid in CHECK_IN_STATUS else "🔴 未上班"
+)
 
-# ===== 3. 修改：Return 回座（确保带次数统计和超时 ⚠️） =====
+
+        bot.send_message(
+            message.chat.id,
+            f"✅ 已注册\n{status}\n\n" + stats_text(uid),
+            reply_markup=main_keyboard()
+        )
+# ===== 补全缺失的 [Return] 回座功能 =====
 def back(message):
     uid = message.from_user.id
     name = message.from_user.first_name
+    
     if uid not in user_activity:
         safe_pm(uid, "❌ 您当前没有进行中的活动。")
         return
 
+    # 获取活动并清除状态
     act_data = user_activity.pop(uid)
     start_dt = act_data["start_dt"]
     end_dt = now()
     
+    # 计算时长
     diff = end_dt - start_dt
-    m, s = divmod(int(diff.total_seconds()), 60)
-    duration_str = f"{m}:{s:02d}"
+    minutes = int(diff.total_seconds() // 60)
+    seconds = int(diff.total_seconds() % 60)
+    duration_str = f"{minutes}:{seconds:02d}"
     
-    # 检查超时
-    timeout_limit = ACTIVITY_TIMES.get(act_data["act"], 0)
-    warning = " ⚠️" if m >= timeout_limit else ""
+    # 检查是否超时 (ACTIVITY_TIMES 单位是分钟)
+    timeout_flag = minutes >= ACTIVITY_TIMES.get(act_data["act"], 0)
+    warning = " ⚠️" if timeout_flag else ""
 
+    act_label = ACTIVITY_LABELS.get(act_data["act"], "Activity")
     s = user_sessions.get(uid, {})
+
+    # ===== 组装您要求的通知格式 =====
     msg = (
         f"👤 {name}\n"
         f"🍽 {s.get('Eating',0)} / {MAX_TIMES['Eating']}  "
@@ -484,9 +500,10 @@ def back(message):
         f"End: {end_dt.strftime('%H:%M:%S')}\n"
         f"Duration: {duration_str}{warning}"
     )
+
     send_group(msg)
     safe_pm(uid, f"✅ 已回座，耗时 {duration_str}", reply_markup=main_keyboard())
-      
+   
 # ===== 修复后的 [Check Out] 下班功能 =====
 def check_out(uid, name):
     if uid not in CHECK_IN_STATUS:
