@@ -4,6 +4,7 @@ DATA_FILE = "attendance.json"
 REGISTER_FILE = "registered_users.json"
 import os
 import threading
+import time as time_module  # 导入标准 time 模块并重命名
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 import telebot
@@ -404,7 +405,8 @@ def check_missing_checkins():
         except Exception as e:
             print(f"Monitor Error: {e}")
         
-        time.sleep(30)
+        time_module.sleep(30)
+
 
 # ===== 2. 修复：下班功能（找回详细统计格式） =====
 def check_out(uid, name):
