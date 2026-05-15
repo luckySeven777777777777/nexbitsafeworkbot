@@ -406,13 +406,19 @@ def check_missing_checkins():
         # 每 30 秒检查一次
         threading.Event().wait(30)
 
-# 辅助通知函数
+# 找到这个函数并修改
 def send_late_notice_by_id(uid, role_name):
     try:
         chat = bot.get_chat(uid)
         name = chat.first_name or "User"
         notice = f"<a href='tg://user?id={uid}'>{name}</a> {role_name} 未打卡 ⚠️"
+        
+        # 1. 发送到专门的迟到群 (使用 Late Bot)
         send_late_notice(notice)
+        
+        # 2. 【新增】同时也发送到主业务群 (使用主 Bot)
+        send_group(notice) 
+        
     except Exception as e:
         print(f"Notice error for {uid}: {e}")
 # ===== /start =====
