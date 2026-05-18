@@ -1,7 +1,4 @@
 import json
-
-DATA_FILE = "attendance.json"
-REGISTER_FILE = "registered_users.json"
 import os
 import threading
 from datetime import datetime, timedelta, time
@@ -10,9 +7,10 @@ import telebot
 from telebot.types import ReplyKeyboardMarkup
 from collections import defaultdict
 
+DATA_FILE = "attendance.json"
+REGISTER_FILE = "registered_users.json"
 
 ATTENDANCE = defaultdict(lambda: defaultdict(dict))
-# ✅【新增】永久注册用户
 REGISTERED_USERS = set()
 
 def load_attendance():
@@ -91,18 +89,17 @@ def save_attendance():
             data[str(uid)][month] = {}
             for day, rec in days.items():
                 data[str(uid)][month][day] = {
-    "checkin": rec.get("checkin").isoformat() if rec.get("checkin") else None,
-    "checkout": rec.get("checkout").isoformat() if rec.get("checkout") else None,
+                    "checkin": rec.get("checkin").isoformat() if rec.get("checkin") else None,
+                    "checkout": rec.get("checkout").isoformat() if rec.get("checkout") else None,
 
-    "morning_checkin": rec.get("morning_checkin").isoformat() if rec.get("morning_checkin") else None,
-    "morning_checkout": rec.get("morning_checkout").isoformat() if rec.get("morning_checkout") else None,
-    "night_checkin": rec.get("night_checkin").isoformat() if rec.get("night_checkin") else None,
-    "night_checkout": rec.get("night_checkout").isoformat() if rec.get("night_checkout") else None,
+                    "morning_checkin": rec.get("morning_checkin").isoformat() if rec.get("morning_checkin") else None,
+                    "morning_checkout": rec.get("morning_checkout").isoformat() if rec.get("morning_checkout") else None,
+                    "night_checkin": rec.get("night_checkin").isoformat() if rec.get("night_checkin") else None,
+                    "night_checkout": rec.get("night_checkout").isoformat() if rec.get("night_checkout") else None,
 
-    "late_minutes": rec.get("late_minutes", 0),
-    "early_leave_minutes": rec.get("early_leave_minutes", 0),
-}
-
+                    "late_minutes": rec.get("late_minutes", 0),
+                    "early_leave_minutes": rec.get("early_leave_minutes", 0),
+                }
 
     try:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -110,18 +107,12 @@ def save_attendance():
     except Exception as e:
         print("❌ Failed to save attendance.json:", e)
 
-# 结构：
-# ATTENDANCE[uid][YYYY-MM][YYYY-MM-DD] = {
-#   "checkin": datetime or None,
-#   "checkout": datetime or None
-# }
-
 # ===== Timezone =====
 LOCAL_TZ = ZoneInfo("Asia/Yangon")  # 缅甸
-# 如果是中国用：ZoneInfo("Asia/Shanghai")
 
 def now():
     return datetime.now(LOCAL_TZ)
+
 # ===== Load env =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID")) if os.getenv("GROUP_CHAT_ID") else None
@@ -133,12 +124,10 @@ late_bot = None
 if LATE_BOT_TOKEN and LATE_GROUP_ID:
     late_bot = telebot.TeleBot(LATE_BOT_TOKEN)
 
-
 if not BOT_TOKEN:
     raise Exception("❌ BOT_TOKEN is not set")
 
 bot = telebot.TeleBot(BOT_TOKEN)
-
 
 # ===== Config =====
 ACTIVITY_TIMES = {
@@ -156,6 +145,7 @@ MAX_TIMES = {
     "Smoking": 4,
     "Other": 2,
 }
+
 ACTIVITY_LABELS = {
     "Eating": "Eat",
     "ToiletLarge": "Toilet",
@@ -163,93 +153,36 @@ ACTIVITY_LABELS = {
     "Smoking": "Smoking",
     "Other": "Other",
 }
+
 def ordinal(n):
     if 10 <= n % 100 <= 20:
         return f"{n}th"
     return f"{n}{ {1:'st', 2:'nd', 3:'rd'}.get(n % 10, 'th') }"
-# ===== HR 用户配置（只填 HR 的 Telegram user_id）=====
-HR_USERS = {
-    6917597442,
-    7569556703,
-    5186967624,
-    8183357784,
-    7501352060,
-    6028186424,
-}
-# ===== FINDING 用户配置（Telegram user_id）=====
-FINDING_USERS = {
-    7406648934,
-    7300796372,
-    7375446542,
-    7450025463,
-    8248857112,
-    7773005580,
-    7977677975,
-    6438074082,
-    6438074082,
-    1966382979,# finding 员工 2
-}
-# ===== CUSTOM NIGHT 用户 =====
-CUSTOM_NIGHT_USERS = {
-    2055027475,
-    8337820899,
-    6863315227,
-    2018656742,
-    6635424294,
-    7794920274,
-    1625231530,
-    7961174070,
-    2094656277,
-    8101295137, 
-    8101295137,# 推广员工 ID
-}
-SHIFT_RULES = {
-    "HR": {
-        "start": time(9, 0),
-        "end": time(19, 0),
-    },
-    "FINDING": {
-        "morning": (time(7, 0), time(12, 0)),
-        "night": (time(19, 0), time(2, 0)), # 原有的保持不变
-    },
-    "PROMO_NIGHT_NEW": { # 统一定义新的夜班时间
-        "start": time(20, 30),
-        "end": time(9, 30),
-    }
-}
+
+# ===== 用户配置 =====
+HR_USERS = {6917597442, 7569556703, 5186967624, 8183357784, 7501352060, 6028186424}
+FINDING_USERS = {7406648934, 7300796372, 7375446542, 7450025463, 8248857112, 7773005580, 7977677975, 6438074082, 1966382979}
+CUSTOM_NIGHT_USERS = {2055027475, 8337820899, 6863315227, 2018656742, 6635424294, 7794920274, 1625231530, 7961174070, 2094656277, 8101295137}
+
 # ===== Memory =====
 user_activity = {}
 user_sessions = {}
 CHECK_IN_STATUS = {}
-
-
-
-# ===== ERA Style Logs (NEW) =====
 user_logs = {}
 activity_timeout = {}
 
 # ===== Keyboard =====
 def main_keyboard():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-
-    # 最上面：上下班
     kb.row("🏢 Check In", "🏠 Check Out")
-
-    # 日常操作
     kb.row("🍽 Eat", "🚬 Smoking")
     kb.row("💧 Pee", "🚽 Toilet")
-
-    # 放在一起：Other + Return
     kb.row("📝 Other", "↩ Return")
-
     return kb
-
 
 # ===== Stats =====
 def stats_text(uid):
-    if uid not in user_sessions:
-        return "No records"
-
+    user_sessions.setdefault(uid, {"Eating": 0, "ToiletLarge": 0, "ToiletSmall": 0, "Smoking": 0, "Other": 0})
     s = user_sessions[uid]
     return (
         f"👤 User ID: {uid}\n\n"
@@ -257,32 +190,25 @@ def stats_text(uid):
         f"💧 Pee: {s['ToiletSmall']} / {MAX_TIMES['ToiletSmall']} TIME\n"
         f"🚽 Toilet: {s['ToiletLarge']} / {MAX_TIMES['ToiletLarge']} TIME\n"
         f"🚬 Smoking: {s['Smoking']} / {MAX_TIMES['Smoking']} TIME\n"
-        f"📝 Other: {s['Other']} / {MAX_TIMES['Other']} TIME\n"
+        f"📝 Other: {s['Other']} / {MAX_TIMES['Other']} TIME"
     )
 
-
-# ===== Attendance Statistics (修正版) =====
 def get_attendance_summary(uid):
     if uid not in ATTENDANCE:
         return 0, 0
-
     now_dt = now()
     current_month = now_dt.strftime("%Y-%m")
-
     total_days = set()
     month_days = set()
 
     for month, days in ATTENDANCE[uid].items():
         for day, rec in days.items():
-            # HR 逻辑
             if uid in HR_USERS:
                 if rec.get("checkin") and rec.get("checkout"):
                     full_date = f"{month}-{day[-2:]}"
                     total_days.add(full_date)
                     if month == current_month:
                         month_days.add(full_date)
-
-            # FINDING / PROMO 逻辑
             else:
                 if (rec.get("morning_checkin") and rec.get("morning_checkout") and
                     rec.get("night_checkin") and rec.get("night_checkout")):
@@ -290,41 +216,21 @@ def get_attendance_summary(uid):
                     total_days.add(full_date)
                     if month == current_month:
                         month_days.add(full_date)
-
     return len(month_days), len(total_days)
-
 
 def get_shift_standard(dt, uid):
     t = dt.time()
-
-    # ===== 1. HR 用户 (09:00 - 19:00) =====
     if uid in HR_USERS:
-        return {
-            "role": "HR",
-            "shift": "DAY",
-            "start": time(9, 0),
-            "end": time(19, 0),
-        }
-
-    # ===== 2. FINDING 用户 (早/晚两班) =====
+        return {"role": "HR", "shift": "DAY", "start": time(9, 0), "end": time(19, 0)}
     if uid in FINDING_USERS:
         if time(7, 0) <= t <= time(12, 0):
             return {"role": "FINDING", "shift": "MORNING", "start": time(7, 0), "end": time(12, 0)}
         if t >= time(19, 0) or t < time(2, 0):
             return {"role": "FINDING", "shift": "NIGHT", "start": time(19, 0), "end": time(2, 0), "cross_day": True}
-        # 默认早班
         return {"role": "FINDING", "shift": "MORNING", "start": time(7, 0), "end": time(12, 0)}
+    return {"role": "PROMO", "shift": "NIGHT", "start": time(20, 30), "end": time(9, 30), "cross_day": True}
 
-    # ===== 3. PROMO & CUSTOM 用户 (统一 20:30 - 09:30) =====
-    return {
-        "role": "PROMO",
-        "shift": "NIGHT",
-        "start": time(20, 30),   # 晚上 8:30
-        "end": time(9, 30),      # 次日 9:30
-        "cross_day": True
-    }
-
-# ===== Send group =====
+# ===== Send functions =====
 def send_group(msg):
     if not GROUP_CHAT_ID:
         return
@@ -332,18 +238,15 @@ def send_group(msg):
         bot.send_message(GROUP_CHAT_ID, msg)
     except Exception as e:
         print("❌ send_group failed:", e)
-# ===== Send late notice =====
+
 def send_late_notice(msg):
     if late_bot and LATE_GROUP_ID:
         try:
-            late_bot.send_message(
-                LATE_GROUP_ID,
-                msg,
-                parse_mode="HTML"
-            )
+            late_bot.send_message(LATE_GROUP_ID, msg, parse_mode="HTML")
         except Exception as e:
             print("❌ send_late_notice failed:", e)
-# ===== 未打卡提醒（4分钟检测 - 全自动班次版）=====
+
+# ===== 未打卡提醒 =====
 MISSED_CHECK_SENT = set()
 
 def check_missing_checkins():
@@ -358,7 +261,6 @@ def check_missing_checkins():
                 date_key = today.strftime("%Y-%m-%d")
                 rec = ATTENDANCE.get(uid, {}).get(month_key, {}).get(date_key, {})
 
-                # --- A. HR 检测 (09:00 上班 + 4min 提醒) ---
                 if uid in HR_USERS:
                     limit_dt = datetime.combine(today, time(9, 4), tzinfo=LOCAL_TZ)
                     key = (uid, "HR_DAY", today)
@@ -368,9 +270,7 @@ def check_missing_checkins():
                             MISSED_CHECK_SENT.add(key)
                     continue
 
-                # --- B. FINDING 检测 (07:00 / 19:00 上班 + 4min 提醒) ---
                 if uid in FINDING_USERS:
-                    # 早班 07:04
                     m_limit = datetime.combine(today, time(7, 4), tzinfo=LOCAL_TZ)
                     key_m = (uid, "FINDING_M", today)
                     if m_limit <= now_dt < m_limit + timedelta(seconds=60) and key_m not in MISSED_CHECK_SENT:
@@ -378,7 +278,6 @@ def check_missing_checkins():
                             send_late_notice_by_id(uid, "FINDING 早班")
                             MISSED_CHECK_SENT.add(key_m)
                     
-                    # 晚班 19:04
                     n_limit = datetime.combine(today, time(19, 4), tzinfo=LOCAL_TZ)
                     key_n = (uid, "FINDING_N", today)
                     if n_limit <= now_dt < n_limit + timedelta(seconds=60) and key_n not in MISSED_CHECK_SENT:
@@ -387,8 +286,6 @@ def check_missing_checkins():
                             MISSED_CHECK_SENT.add(key_n)
                     continue
 
-                # --- C. PROMO & CUSTOM 检测 (20:30 上班 + 4min 提醒) ---
-                # 排除 HR 和 Finding 后，推广(Promo)统一执行 20:34 检测
                 p_limit = datetime.combine(today, time(20, 34), tzinfo=LOCAL_TZ)
                 key_p = (uid, "PROMO_NIGHT_NEW", today)
                 if p_limit <= now_dt < p_limit + timedelta(seconds=60) and key_p not in MISSED_CHECK_SENT:
@@ -399,96 +296,67 @@ def check_missing_checkins():
         except Exception as e:
             print("❌ missing checkin loop error:", e)
 
-        # 每 30 秒检查一次
         threading.Event().wait(30)
 
-# 找到这个函数并修改
 def send_late_notice_by_id(uid, role_name):
     try:
         chat = bot.get_chat(uid)
         name = chat.first_name or "User"
-        notice = f"<a href='tg://user?id={uid}'>{name}</a> {role_name} 未打卡 ⚠️"
-        
-        # 1. 发送到专门的迟到群 (使用 Late Bot)
+        notice = f"👤 {name}💸+{uid} {role_name} 未打卡 ⚠️"
         send_late_notice(notice)
-        
-        # 2. 【新增】同时也发送到主业务群 (使用主 Bot)
         send_group(notice) 
-        
     except Exception as e:
         print(f"Notice error for {uid}: {e}")
-# ===== /start =====
+
+# ===== Commands =====
 @bot.message_handler(commands=["start"])
 def start(message):
-
-    # 🚫 如果是机器人，直接忽略
     if message.from_user.is_bot:
         return
-
     uid = message.from_user.id
-    name = message.from_user.first_name
 
-    # ✅ 第一次注册
     if uid not in REGISTERED_USERS:
         REGISTERED_USERS.add(uid)
-        save_registered_users()   # ✅ 必须加这个
+        save_registered_users()
 
-        user_sessions.setdefault(uid, {
-            "Eating": 0,
-            "ToiletLarge": 0,
-            "ToiletSmall": 0,
-            "Smoking": 0,
-            "Other": 0,
-        })
-        user_logs.setdefault(uid, [])
-
-        bot.send_message(
-            message.chat.id,
-            "✅ Registration successful. No need to click again in the future. /start\n\n"
-            + stats_text(uid),
-            reply_markup=main_keyboard()
-        )
+    if uid in CHECK_IN_STATUS:
+        status_line = f"🟢 已上班：{CHECK_IN_STATUS[uid]['time'].strftime('%H:%M:%S')}"
     else:
-        # ✅ 已注册，只提示 + 显示上班状态
-        status = (
-            f"🟢 已上班：{CHECK_IN_STATUS[uid]['time'].strftime('%H:%M:%S')}"
-            if uid in CHECK_IN_STATUS else "🔴 未上班"
-)
+        status_line = "🔴 未上班"
 
+    panel_msg = (
+        f"✅ 已注册\n"
+        f"{status_line}\n\n"
+        f"{stats_text(uid)}"
+    )
+    bot.send_message(message.chat.id, panel_msg, reply_markup=main_keyboard())
 
-        bot.send_message(
-            message.chat.id,
-            f"✅ 已注册\n{status}\n\n" + stats_text(uid),
-            reply_markup=main_keyboard()
-        )
-# ===== 补全缺失的 [Return] 回座功能 =====
+@bot.message_handler(commands=["attendance"])
+def attendance_report(message):
+    bot.reply_to(message, "📊 考勤统计功能已关闭")
+
+# ===== Return (回座) =====
 def back(message):
     uid = message.from_user.id
     name = message.from_user.first_name
     
     if uid not in user_activity:
-        safe_pm(uid, "❌ 您当前没有进行中的活动。")
+        safe_pm(uid, "❌ 您当前没有进行中的 activity。")
         return
 
-    # 获取活动并清除状态
     act_data = user_activity.pop(uid)
     start_dt = act_data["start_dt"]
     end_dt = now()
     
-    # 计算时长
     diff = end_dt - start_dt
     minutes = int(diff.total_seconds() // 60)
     seconds = int(diff.total_seconds() % 60)
     duration_str = f"{minutes}:{seconds:02d}"
     
-    # 检查是否超时 (ACTIVITY_TIMES 单位是分钟)
     timeout_flag = minutes >= ACTIVITY_TIMES.get(act_data["act"], 0)
     warning = " ⚠️" if timeout_flag else ""
-
-    act_label = ACTIVITY_LABELS.get(act_data["act"], "Activity")
     s = user_sessions.get(uid, {})
 
-    # ===== 组装您要求的通知格式 =====
     msg = (
         f"👤 {name}\n"
         f"🍽 {s.get('Eating',0)} / {MAX_TIMES['Eating']}  "
@@ -505,27 +373,24 @@ def back(message):
 
     send_group(msg)
     safe_pm(uid, f"✅ 已回座，耗时 {duration_str}", reply_markup=main_keyboard())
-   
-# ===== 修复后的 [Check Out] 下班功能 =====
+
+# ===== Check Out (下班) =====
 def check_out(uid, name):
     if uid not in CHECK_IN_STATUS:
         safe_pm(uid, "❌ 您尚未上班打卡，无需下班。")
         return
 
-    # 获取上班信息并从状态中移除
     checkin_info = CHECK_IN_STATUS.pop(uid)
     in_time = checkin_info["time"]
     shift_info = checkin_info["shift"]
     out_time = now()
     
-    # --- 计算工作时长 ---
     diff = out_time - in_time
     hours = diff.seconds // 3600
     minutes = (diff.seconds % 3600) // 60
     seconds = diff.seconds % 60
     duration_str = f"{hours}h {minutes}m {seconds}s"
 
-    # --- 判定准时状态 ---
     shift_end_dt = datetime.combine(out_time.date(), shift_info["end"], tzinfo=LOCAL_TZ)
     if shift_info.get("cross_day") and out_time.time() > time(12, 0):
         shift_end_dt += timedelta(days=1)
@@ -534,9 +399,11 @@ def check_out(uid, name):
     if out_time < shift_end_dt:
         early_leave = int((shift_end_dt - out_time).total_seconds() // 60)
         status_msg = f"⚠️ Early Leave: {early_leave} min"
+        
+        # 🔴【同步异常群】
+        late_group_out_msg = f"👤 {name}💸+{uid} 提前下班 ⚠️ Early Leave: {early_leave} min"
+        send_late_notice(late_group_out_msg)
 
-    # ===== 组装您要求的详细通知格式 =====
-    # 格式：👤 名字💸+ID【Nexbit-Safe】
     msg = (
         f"👤 {name}💸+{uid}【Nexbit-Safe】\n\n"
         f"✅ Checked out successfully\n"
@@ -546,48 +413,25 @@ def check_out(uid, name):
         f"{status_msg}"
     )
 
-    # 重置当日活动次数
     user_sessions.pop(uid, None) 
-
-    # 发送群组和私聊通知
     send_group(msg)
     safe_pm(uid, f"🏠 下班成功！\n工作时长：{duration_str}", reply_markup=main_keyboard())
 
-# ===== 补充缺失的辅助发送函数 =====
 def safe_pm(uid, text, reply_markup=None):
     try:
         bot.send_message(uid, text, reply_markup=reply_markup)
     except Exception as e:
         print(f"❌ 无法私聊用户 {uid}: {e}")
-@bot.message_handler(commands=["attendance"])
-def attendance_report(message):
-    uid = message.from_user.id
 
-    month_days, total_days = get_attendance_summary(uid)
-
-    bot.reply_to(
-    message,
-    "📊 考勤统计功能已关闭"
-)
-
-
-# ===== Start Activity =====
+# ===== Start Activity (开始活动) =====
 def start_activity(uid, name, act):
-    # ✅ 没点 /start 也能正常用（关键）
     if uid not in REGISTERED_USERS:
         REGISTERED_USERS.add(uid)
         save_registered_users()
 
-    user_sessions.setdefault(uid, {
-        "Eating": 0,
-        "ToiletLarge": 0,
-        "ToiletSmall": 0,
-        "Smoking": 0,
-        "Other": 0,
-    })
+    user_sessions.setdefault(uid, {"Eating": 0, "ToiletLarge": 0, "ToiletSmall": 0, "Smoking": 0, "Other": 0})
     user_logs.setdefault(uid, [])
 
-    # ===== 下面保持你原来的逻辑 =====
     if uid in user_activity:
         safe_pm(uid, "❌ Please finish your current activity first.")
         return
@@ -600,7 +444,6 @@ def start_activity(uid, name, act):
         safe_pm(uid, f"❌ {ACTIVITY_LABELS[act]} limit reached.")
         return
 
-
     start_dt = now()
     user_sessions[uid][act] += 1
 
@@ -610,15 +453,9 @@ def start_activity(uid, name, act):
     }
     activity_timeout[uid] = False
 
-    # ===== 计算剩余次数 =====
-    used = user_sessions[uid][act]
-    max_times = MAX_TIMES[act]
-    remaining = max_times - used
-
     display_name = f"{uid}+{name} 【Nexbit-Safe】"
     activity_name = ACTIVITY_LABELS[act]
 
-    # ===== ERA 风格提示 =====
     send_group(
         f"👤 {display_name}\n"
         f"📅 Time: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -630,17 +467,17 @@ def start_activity(uid, name, act):
 
     safe_pm(uid, f"✅ {activity_name} started")
 
-    # ===== countdown 定时器 =====
-# 在 start_activity 函数内部：
+    # ===== 独立闭包内部定时器 =====
     def countdown():
         if uid not in user_activity or user_activity[uid]["start_dt"] != start_dt:
             return
-        # 按照要求格式提示：⏰ ID+名字 【项目名】 动作 TIMEOUT ⚠️
-        send_group(f"⏰ {uid}+{name} 【Nexbit-Safe】 {activity_name} TIMEOUT ⚠️")
+        timeout_msg = f"⏰ {uid}+{name} 【Nexbit-Safe】 {activity_name} TIMEOUT ⚠️"
+        send_group(timeout_msg)
+        send_late_notice(timeout_msg)  # 🔴【同步异常群】
 
     threading.Timer(ACTIVITY_TIMES[act] * 60, countdown).start()
 
-# ===== 修复后的 Check In 函数 =====
+# ===== Check In (上班) =====
 def check_in(uid, name):
     now_dt = now()
 
@@ -653,7 +490,6 @@ def check_in(uid, name):
         safe_pm(uid, "⛔ 当前不在你的上班班次时间内")
         return
 
-    # ===== 班次逻辑处理 (保持不变) =====
     if shift_info["role"] in ("FINDING", "PROMO", "CUSTOM"):
         night_start = time(19, 0)
         if shift_info["role"] == "CUSTOM":
@@ -675,19 +511,16 @@ def check_in(uid, name):
 
     shift_start_dt = datetime.combine(logical_date, shift_info["start"], tzinfo=LOCAL_TZ)
     
-    # 计算迟到
     late_minutes = 0
     if now_dt > shift_start_dt:
         late_minutes = int((now_dt - shift_start_dt).total_seconds() // 60)
 
-    # ===== 记录状态 =====
     CHECK_IN_STATUS[uid] = {
         "time": now_dt,
         "logical_date": logical_date,
         "shift": shift_info
     }
 
-    # 准备考勤数据
     month_key = logical_date.strftime("%Y-%m")
     date_key = logical_date.strftime("%Y-%m-%d")
     ATTENDANCE[uid].setdefault(month_key, {})
@@ -704,36 +537,27 @@ def check_in(uid, name):
 
     day_rec["late_minutes"] = max(day_rec.get("late_minutes", 0), late_minutes)
 
-    # ===== 发送群通知 (修复格式) =====
-    # 按照要求显示：✅ {name} checked in at {time}
     msg = f"✅ {name} checked in at {now_dt.strftime('%H:%M:%S')}"
     if late_minutes > 0:
         msg += f" ⚠️ Late {late_minutes} min"
     send_group(msg)
 
-    # ========================================================
-    # 🔴【新增：迟到群通知逻辑】
-    # 当检测到用户迟到时，自动拼装类似 “名字 班次 ⚠️ late 分钟数” 格式发送至迟到群
-    # ========================================================
+    # 🔴【完美契合您指定的迟到群格式】
     if late_minutes > 0:
-        shift_name = f"{shift_info['role']} {shift_info['shift']}".lower() # 例如: finding morning / hr day
-        # 拼装格式，如：<a href='tg://user?id=123'>苏苏</a> morning ⚠️ late 45min
-        late_group_msg = f"<a href='tg://user?id={uid}'>{name}</a> {shift_name} ⚠️ late {late_minutes}min"
+        shift_name = f"{shift_info['shift']}".lower() # 获取班次名 (morning / night)
+        late_group_msg = f"👤 {name}💸+{uid}{shift_name} ⚠️ late {late_minutes}min"
         send_late_notice(late_group_msg)
-    # ========================================================
 
-    # 保存数据
     save_attendance()
 
-    # 私聊确认
-    safe_pm(
-        uid,
-        f"🟢 已上班：{now_dt.strftime('%H:%M:%S')}\n"
+    bot_checkin_pm = (
+        f"✅ 已上班 {name} checked in at {now_dt.strftime('%H:%M:%S')}\n"
         f"👔 班次：{shift_info['role']} {shift_info['shift']}\n"
-        f"⏰ 迟到：{late_minutes} 分钟",
-        reply_markup=main_keyboard()
+        f"⏰ 迟到：{late_minutes} 分钟"
     )
-# ===== 修复后的 Handler (确保 Return 正常触发) =====
+    safe_pm(uid, bot_checkin_pm, reply_markup=main_keyboard())
+
+# ===== Handler =====
 @bot.message_handler(func=lambda m: True)
 def handler(message):
     if message.from_user.is_bot:
@@ -757,7 +581,7 @@ def handler(message):
         check_in(uid, name)
     elif "Check Out" in txt:
         check_out(uid, name)
-    elif "Return" in txt: # 👈 确保这里能捕获到 Return 按钮
+    elif "Return" in txt: 
         back(message)
           
 # ===== Run =====
@@ -765,7 +589,6 @@ if __name__ == "__main__":
     load_attendance()
     load_registered_users()
 
-    # ✅ 启动未打卡检测线程
     threading.Thread(
         target=check_missing_checkins,
         daemon=True
@@ -778,5 +601,3 @@ if __name__ == "__main__":
         timeout=20,
         long_polling_timeout=20
     )
-
-
