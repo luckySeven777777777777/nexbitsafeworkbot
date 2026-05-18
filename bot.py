@@ -203,7 +203,6 @@ CUSTOM_NIGHT_USERS = {
     8101295137, 
     8101295137,# 推广员工 ID
 }
-
 SHIFT_RULES = {
     "HR": {
         "start": time(9, 0),
@@ -712,6 +711,17 @@ def check_in(uid, name):
         msg += f" ⚠️ Late {late_minutes} min"
     send_group(msg)
 
+    # ========================================================
+    # 🔴【新增：迟到群通知逻辑】
+    # 当检测到用户迟到时，自动拼装类似 “名字 班次 ⚠️ late 分钟数” 格式发送至迟到群
+    # ========================================================
+    if late_minutes > 0:
+        shift_name = f"{shift_info['role']} {shift_info['shift']}".lower() # 例如: finding morning / hr day
+        # 拼装格式，如：<a href='tg://user?id=123'>苏苏</a> morning ⚠️ late 45min
+        late_group_msg = f"<a href='tg://user?id={uid}'>{name}</a> {shift_name} ⚠️ late {late_minutes}min"
+        send_late_notice(late_group_msg)
+    # ========================================================
+
     # 保存数据
     save_attendance()
 
@@ -723,7 +733,6 @@ def check_in(uid, name):
         f"⏰ 迟到：{late_minutes} 分钟",
         reply_markup=main_keyboard()
     )
-
 # ===== 修复后的 Handler (确保 Return 正常触发) =====
 @bot.message_handler(func=lambda m: True)
 def handler(message):
