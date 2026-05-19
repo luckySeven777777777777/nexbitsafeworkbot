@@ -161,7 +161,7 @@ def ordinal(n):
 
 # ===== 用户配置 =====
 HR_USERS = {6917597442, 7569556703, 5186967624, 8183357784, 7501352060, 6028186424}
-FINDING_USERS = {7406648934, 7300796372, 7375446542, 7450025463, 8248857112, 7773005580, 7977677975, 6438074082, 1966382979}
+FINDING_USERS = {7406648934, 7300796372, 7375446542, 7450025463, 8248857112, 7773005580, 7977677975, 6438074082, 1966382979,8349071207,6987104711}
 CUSTOM_NIGHT_USERS = {2055027475, 8337820899, 6863315227, 2018656742, 6635424294, 7794920274, 1625231530, 7961174070, 2094656277, 8101295137}
 
 # ===== Memory =====
@@ -231,18 +231,18 @@ def get_shift_standard(dt, uid):
     return {"role": "PROMO", "shift": "NIGHT", "start": time(20, 30), "end": time(9, 30), "cross_day": True}
 
 # ===== Send functions =====
-def send_group(msg):
+def send_group(msg, parse_mode=None):
     if not GROUP_CHAT_ID:
         return
     try:
-        bot.send_message(GROUP_CHAT_ID, msg)
+        bot.send_message(GROUP_CHAT_ID, msg, parse_mode=parse_mode)
     except Exception as e:
         print("❌ send_group failed:", e)
 
-def send_late_notice(msg):
+def send_late_notice(msg, parse_mode=None):
     if late_bot and LATE_GROUP_ID:
         try:
-            late_bot.send_message(LATE_GROUP_ID, msg, parse_mode="HTML")
+            late_bot.send_message(LATE_GROUP_ID, msg, parse_mode=parse_mode)
         except Exception as e:
             print("❌ send_late_notice failed:", e)
 
@@ -302,9 +302,10 @@ def send_late_notice_by_id(uid, role_name):
     try:
         chat = bot.get_chat(uid)
         name = chat.first_name or "User"
-        notice = f"👤 {name}💸+{uid} {role_name} 未打卡 ⚠️"
-        send_late_notice(notice)
-        send_group(notice) 
+        # 🟢【未打卡】两群同步发送 HTML @通知
+        notice = f"👤 <a href=\"tg://user?id={uid}\">{name}</a>💸+{uid} {role_name} 未打卡 ⚠️"
+        send_late_notice(notice, parse_mode="HTML")
+        send_group(notice, parse_mode="HTML") 
     except Exception as e:
         print(f"Notice error for {uid}: {e}")
 
@@ -374,7 +375,6 @@ def back(message):
     send_group(msg)
     safe_pm(uid, f"✅ 已回座，耗时 {duration_str}", reply_markup=main_keyboard())
 
-# ===== Check Out (下班) =====
 def check_out(uid, name):
     if uid not in CHECK_IN_STATUS:
         safe_pm(uid, "❌ 您尚未上班打卡，无需下班。")
@@ -383,27 +383,31 @@ def check_out(uid, name):
     checkin_info = CHECK_IN_STATUS.pop(uid)
     in_time = checkin_info["time"]
     shift_info = checkin_info["shift"]
+    logical_date = checkin_info["logical_date"]
     out_time = now()
     
-    diff = out_time - in_time
-    hours = diff.seconds // 3600
-    minutes = (diff.seconds % 3600) // 60
-    seconds = diff.seconds % 60
-    duration_str = f"{hours}h {minutes}m {seconds}s"
-
-    shift_end_dt = datetime.combine(out_time.date(), shift_info["end"], tzinfo=LOCAL_TZ)
-    if shift_info.get("cross_day") and out_time.time() > time(12, 0):
+    # 1. 动态计算班次结束时间
+    shift_end_dt = datetime.combine(logical_date, shift_info["end"], tzinfo=LOCAL_TZ)
+    if shift_info.get("cross_day"):
         shift_end_dt += timedelta(days=1)
     
+    # 2. 计算时长
+    diff = out_time - in_time
+    duration_str = f"{int(diff.total_seconds() // 3600)}h {int((diff.seconds % 3600) // 60)}m {diff.seconds % 60}s"
+    
     status_msg = "✅ On time"
-    if out_time < shift_end_dt:
+    
+    # 3. 判定早退 (凌晨 00:00 - 02:00 豁免)
+    is_night_finish = (shift_info.get("cross_day") and out_time.time() < time(2, 0))
+    
+    if not is_night_finish and out_time < shift_end_dt:
         early_leave = int((shift_end_dt - out_time).total_seconds() // 60)
-        status_msg = f"⚠️ Early Leave: {early_leave} min"
-        
-        # 🔴【同步异常群】
-        late_group_out_msg = f"👤 {name}💸+{uid} 提前下班 ⚠️ Early Leave: {early_leave} min"
-        send_late_notice(late_group_out_msg)
+        if early_leave > 5: 
+            status_msg = f"⚠️ Early Leave: {early_leave} min"
+            late_group_out_msg = f"👤 <a href=\"tg://user?id={uid}\">{name}</a>💸+{uid} 提前下班 ⚠️ Early Leave: {early_leave} min"
+            send_late_notice(late_group_out_msg, parse_mode="HTML")
 
+    # 4. 发送通知
     msg = (
         f"👤 {name}💸+{uid}【Nexbit-Safe】\n\n"
         f"✅ Checked out successfully\n"
@@ -416,7 +420,6 @@ def check_out(uid, name):
     user_sessions.pop(uid, None) 
     send_group(msg)
     safe_pm(uid, f"🏠 下班成功！\n工作时长：{duration_str}", reply_markup=main_keyboard())
-
 def safe_pm(uid, text, reply_markup=None):
     try:
         bot.send_message(uid, text, reply_markup=reply_markup)
@@ -471,9 +474,10 @@ def start_activity(uid, name, act):
     def countdown():
         if uid not in user_activity or user_activity[uid]["start_dt"] != start_dt:
             return
-        timeout_msg = f"⏰ {uid}+{name} 【Nexbit-Safe】 {activity_name} TIMEOUT ⚠️"
-        send_group(timeout_msg)
-        send_late_notice(timeout_msg)  # 🔴【同步异常群】
+        # 🟢【离座超时】两群同步发送 HTML @通知
+        timeout_msg = f"⏰ <a href=\"tg://user?id={uid}\">{name}</a>💸+{uid} 【Nexbit-Safe】 {activity_name} TIMEOUT ⚠️"
+        send_group(timeout_msg, parse_mode="HTML")
+        send_late_notice(timeout_msg, parse_mode="HTML")
 
     threading.Timer(ACTIVITY_TIMES[act] * 60, countdown).start()
 
@@ -542,11 +546,11 @@ def check_in(uid, name):
         msg += f" ⚠️ Late {late_minutes} min"
     send_group(msg)
 
-    # 🔴【完美契合您指定的迟到群格式】
+    # 🟢【迟到】异常通知群 @提及
     if late_minutes > 0:
         shift_name = f"{shift_info['shift']}".lower() # 获取班次名 (morning / night)
-        late_group_msg = f"👤 {name}💸+{uid}{shift_name} ⚠️ late {late_minutes}min"
-        send_late_notice(late_group_msg)
+        late_group_msg = f"👤 <a href=\"tg://user?id={uid}\">{name}</a>💸+{uid}{shift_name} ⚠️ late {late_minutes}min"
+        send_late_notice(late_group_msg, parse_mode="HTML")
 
     save_attendance()
 
