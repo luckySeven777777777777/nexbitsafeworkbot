@@ -204,14 +204,23 @@ def get_attendance_summary(uid):
     for month, days in ATTENDANCE[uid].items():
         for day, rec in days.items():
             if uid in HR_USERS:
+                # HR: checkin + checkout = 1天
                 if rec.get("checkin") and rec.get("checkout"):
                     full_date = f"{month}-{day[-2:]}"
                     total_days.add(full_date)
                     if month == current_month:
                         month_days.add(full_date)
-            else:
+            elif uid in FINDING_USERS:
+                # Finding: morning_checkin + morning_checkout + night_checkin + night_checkout = 1天
                 if (rec.get("morning_checkin") and rec.get("morning_checkout") and
                     rec.get("night_checkin") and rec.get("night_checkout")):
+                    full_date = f"{month}-{day[-2:]}"
+                    total_days.add(full_date)
+                    if month == current_month:
+                        month_days.add(full_date)
+            else:
+                # Chatting/PROMO: night_checkin + night_checkout = 1天
+                if rec.get("night_checkin") and rec.get("night_checkout"):
                     full_date = f"{month}-{day[-2:]}"
                     total_days.add(full_date)
                     if month == current_month:
@@ -393,9 +402,12 @@ def check_out(uid, name):
     
     # 2. 计算时长
     diff = out_time - in_time
-    duration_str = f"{int(diff.total_seconds() // 3600)}h {int((diff.seconds % 3600) // 60)}m {diff.seconds % 60}s"
+    hours = int(diff.total_seconds() // 3600)
+    minutes = int((diff.total_seconds() % 3600) // 60)
+    seconds = int(diff.total_seconds() % 60)
+    duration_str = f"{hours} hours {minutes} minutes {seconds} seconds"
     
-    status_msg = "✅ On time"
+    status_msg = "✅ Checked out on time"
     
     # 3. 判定早退 (凌晨 00:00 - 02:00 豁免)
     is_night_finish = (shift_info.get("cross_day") and out_time.time() < time(2, 0))
@@ -407,14 +419,37 @@ def check_out(uid, name):
             late_group_out_msg = f"👤 <a href=\"tg://user?id={uid}\">{name}</a>💸+{uid} 提前下班 ⚠️ Early Leave: {early_leave} min"
             send_late_notice(late_group_out_msg, parse_mode="HTML")
 
-    # 4. 发送通知
+    # 4. 写入考勤记录
+    month_key = logical_date.strftime("%Y-%m")
+    date_key = logical_date.strftime("%Y-%m-%d")
+    ATTENDANCE[uid].setdefault(month_key, {})
+    ATTENDANCE[uid][month_key].setdefault(date_key, {})
+    day_rec = ATTENDANCE[uid][month_key][date_key]
+    
+    if shift_info["role"] in ("FINDING", "PROMO"):
+        if shift_info["shift"] == "MORNING":
+            day_rec["morning_checkout"] = out_time
+        elif shift_info["shift"] == "NIGHT":
+            day_rec["night_checkout"] = out_time
+    else:
+        day_rec["checkout"] = out_time
+    
+    save_attendance()
+    
+    # 5. 获取月度统计
+    month_days, total_days = get_attendance_summary(uid)
+    
+    # 6. 发送通知
     msg = (
-        f"👤 {name}💸+{uid}【Nexbit-Safe】\n\n"
-        f"✅ Checked out successfully\n"
+        f"👤 {name}💸+{uid}【Nexbit-Safe】\n"
+        f"✅ Successfully checked out\n"
         f"📅 Check-in time: {in_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
         f"📅 Check-out time: {out_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        f"⏰ Work duration: {duration_str}\n"
-        f"{status_msg}"
+        f"⏰ Working hours: {duration_str}\n"
+        f"{status_msg}\n"
+        f"📊 Attendance statistics:\n"
+        f"🗓️ Worked normally this month: {month_days} days\n"
+        f"📊 Total normal working days: {total_days} days"
     )
 
     user_sessions.pop(uid, None) 
