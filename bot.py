@@ -228,6 +228,9 @@ def get_attendance_summary(uid):
     month_shifts = 0
 
     for month, days in ATTENDANCE[uid].items():
+        # 不是当月则跳过，实现每月1号自动清零
+        if month != current_month:
+            continue
         for day, rec in days.items():
             full_date = f"{month}-{day[-2:]}"
             if uid in HR_USERS:
@@ -238,25 +241,21 @@ def get_attendance_summary(uid):
                     if not rec.get(key):
                         break
                     total_days.add(full_date)
-                    if month == current_month:
-                        month_shifts += 1
+                    month_shifts += 1
                     slot += 1
             elif uid in FINDING_USERS:
                 # Finding: morning_checkin 和 night_checkin 各自独立计数
                 if rec.get("morning_checkin"):
                     total_days.add(full_date)
-                    if month == current_month:
-                        month_shifts += 1
+                    month_shifts += 1
                 if rec.get("night_checkin"):
                     total_days.add(full_date)
-                    if month == current_month:
-                        month_shifts += 1
+                    month_shifts += 1
             else:
                 # Chatting/PROMO: 只要有 night_checkin 记录就算一次
                 if rec.get("night_checkin"):
                     total_days.add(full_date)
-                    if month == current_month:
-                        month_shifts += 1
+                    month_shifts += 1
     return month_shifts, len(total_days)
 
 def get_shift_standard(dt, uid):
@@ -376,6 +375,152 @@ def start(message):
 @bot.message_handler(commands=["attendance"])
 def attendance_report(message):
     bot.reply_to(message, "📊 考勤统计功能已关闭")
+
+# ===== 管理员命令：修改员工考勤 =====
+@bot.message_handler(commands=["modify_attendance"])
+def modify_attendance(message):
+    uid = message.from_user.id
+    if uid != ADMIN_ID:
+        bot.reply_to(message, "❌ 仅管理员可操作")
+        return
+    
+    args = message.text.split()
+    if len(args) < 5:
+        bot.reply_to(message, "用法: /modify_attendance <用户ID> <年月日> <checkin/checkout> <时间>\n例: /modify_attendance 6917597442 2024-06-02 checkin 09:00:00")
+        return
+    
+    try:
+        target_uid = int(args[1])
+        date_str = args[2]
+        action = args[3]
+        time_str = args[4]
+        
+        # 解析日期时间
+        dt_str = f"{date_str} {time_str}"
+        new_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=LOCAL_TZ)
+        
+        # 确定月份和日期
+        month_key = new_dt.strftime("%Y-%m")
+        date_key = new_dt.strftime("%Y-%m-%d")
+        
+        # 确保数据结构存在
+        ATTENDANCE[target_uid].setdefault(month_key, {})
+        ATTENDANCE[target_uid][month_key].setdefault(date_key, {})
+        day_rec = ATTENDANCE[target_uid][month_key][date_key]
+        
+        # 根据用户类型确定要修改的字段
+        if target_uid in HR_USERS:
+            # HR: 修改或添加 checkin 记录
+            if action == "checkin":
+                # 找到下一个可用 slot
+                slot = 1
+                while day_rec.get(f"checkin_{slot}" if slot > 1 else "checkin"):
+                    slot += 1
+                key = "checkin" if slot == 1 else f"checkin_{slot}"
+                day_rec[key] = new_dt
+            elif action == "checkout":
+                # 找到对应的 checkin slot
+                slot = 1
+                while day_rec.get(f"checkin_{slot}" if slot > 1 else "checkin"):
+                    slot += 1
+                # 如果找到 checkin 记录，使用对应 slot
+                if slot > 1:
+                    key = "checkout" if slot-1 == 1 else f"checkout_{slot-1}"
+                else:
+                    key = "checkout"
+                day_rec[key] = new_dt
+        elif target_uid in FINDING_USERS:
+            # FINDING: 根据时间判断早班/晚班
+            t = new_dt.time()
+            if time(7, 0) <= t <= time(12, 0):
+                # 早班
+                if action == "checkin":
+                    day_rec["morning_checkin"] = new_dt
+                elif action == "checkout":
+                    day_rec["morning_checkout"] = new_dt
+            else:
+                # 晚班
+                if action == "checkin":
+                    day_rec["night_checkin"] = new_dt
+                elif action == "checkout":
+                    day_rec["night_checkout"] = new_dt
+        else:
+            # CHATTING/PROMO: 夜班
+            if action == "checkin":
+                day_rec["night_checkin"] = new_dt
+            elif action == "checkout":
+                day_rec["night_checkout"] = new_dt
+        
+        save_attendance()
+        bot.reply_to(message, f"✅ 已修改 {target_uid} 的考勤记录\n日期: {date_str}\n操作: {action}\n时间: {time_str}")
+        
+    except Exception as e:
+        bot.reply_to(message, f"❌ 修改失败: {str(e)}")
+
+# ===== 管理员命令：查看员工考勤 =====
+@bot.message_handler(commands=["view_attendance"])
+def view_attendance(message):
+    uid = message.from_user.id
+    if uid != ADMIN_ID:
+        bot.reply_to(message, "❌ 仅管理员可操作")
+        return
+    
+    args = message.text.split()
+    if len(args) < 2:
+        bot.reply_to(message, "用法: /view_attendance <用户ID>")
+        return
+    
+    try:
+        target_uid = int(args[1])
+        if target_uid not in ATTENDANCE:
+            bot.reply_to(message, f"用户 {target_uid} 无考勤记录")
+            return
+        
+        response = f"📊 用户 {target_uid} 考勤记录:\n\n"
+        for month, days in ATTENDANCE[target_uid].items():
+            for day, rec in days.items():
+                response += f"📅 {month}-{day[-2:]}:\n"
+                
+                # HR 记录
+                if target_uid in HR_USERS:
+                    slot = 1
+                    while True:
+                        ck_key = "checkin" if slot == 1 else f"checkin_{slot}"
+                        co_key = "checkout" if slot == 1 else f"checkout_{slot}"
+                        ck = rec.get(ck_key)
+                        co = rec.get(co_key)
+                        if not ck and not co:
+                            break
+                        if ck:
+                            response += f"  {ck_key}: {ck.strftime('%H:%M:%S')}\n"
+                        if co:
+                            response += f"  {co_key}: {co.strftime('%H:%M:%S')}\n"
+                        slot += 1
+                
+                # FINDING 记录
+                if target_uid in FINDING_USERS:
+                    if rec.get("morning_checkin"):
+                        response += f"  早班上班: {rec['morning_checkin'].strftime('%H:%M:%S')}\n"
+                    if rec.get("morning_checkout"):
+                        response += f"  早班下班: {rec['morning_checkout'].strftime('%H:%M:%S')}\n"
+                    if rec.get("night_checkin"):
+                        response += f"  晚班上班: {rec['night_checkin'].strftime('%H:%M:%S')}\n"
+                    if rec.get("night_checkout"):
+                        response += f"  晚班下班: {rec['night_checkout'].strftime('%H:%M:%S')}\n"
+                
+                # CHATTING 记录
+                if target_uid not in HR_USERS and target_uid not in FINDING_USERS:
+                    if rec.get("night_checkin"):
+                        response += f"  夜班上班: {rec['night_checkin'].strftime('%H:%M:%S')}\n"
+                    if rec.get("night_checkout"):
+                        response += f"  夜班下班: {rec['night_checkout'].strftime('%H:%M:%S')}\n"
+                
+                response += "\n"
+        
+        bot.reply_to(message, response)
+        
+    except Exception as e:
+        bot.reply_to(message, f"❌ 查看失败: {str(e)}")
 
 # ===== Return (回座) =====
 def back(message):
