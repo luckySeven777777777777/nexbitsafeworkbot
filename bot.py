@@ -142,7 +142,8 @@ def now():
 # ===== Load env =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID")) if os.getenv("GROUP_CHAT_ID") else None
-ADMIN_IDS = {6062973135, 8530505686}
+admin_ids_str = os.getenv("ADMIN_IDS", "6062973135,8530505686")
+ADMIN_IDS = set(int(x.strip()) for x in admin_ids_str.split(",") if x.strip())
 LATE_BOT_TOKEN = os.getenv("LATE_BOT_TOKEN")
 LATE_GROUP_ID = int(os.getenv("LATE_GROUP_ID")) if os.getenv("LATE_GROUP_ID") else None
 
@@ -267,6 +268,38 @@ def get_shift_standard(dt, uid):
             return {"role": "FINDING", "shift": "NIGHT", "start": time(19, 0), "end": time(2, 0), "cross_day": True}
         return {"role": "FINDING", "shift": "MORNING", "start": time(7, 0), "end": time(12, 0)}
     return {"role": "PROMO", "shift": "NIGHT", "start": time(20, 30), "end": time(9, 30), "cross_day": True}
+
+def get_attribution_date(checkin_logical_date, checkout_dt, uid, shift_info):
+    """根据 checkout 时间决定这个班次最终归属哪一天（缅甸时间）"""
+    checkout_date = checkout_dt.date()
+    checkout_time = checkout_dt.time()
+
+    # 同一天 checkout → 直接归 checkin 那天
+    if checkout_date == checkin_logical_date:
+        return checkin_logical_date
+
+    # 跨天了 → 按截止时间判定
+    if uid in HR_USERS:
+        # HR: checkout 超过凌晨 0:00 → 归 checkout 当天
+        return checkout_date
+
+    elif uid in FINDING_USERS:
+        if shift_info.get("shift") == "NIGHT":
+            # 晚班: checkout 在凌晨 2:00 内 → 归 checkin 那天（前一天）
+            if checkout_time < time(2, 0):
+                return checkin_logical_date
+            return checkout_date
+        else:
+            # 早班: checkout 在下午 5:00 内 → 归 checkin 那天
+            if checkout_time < time(17, 0):
+                return checkin_logical_date
+            return checkout_date
+
+    else:
+        # CHATTING/PROMO: checkout 在中午 12:00 前 → 归 checkin 那天（前一天）
+        if checkout_time < time(12, 0):
+            return checkin_logical_date
+        return checkout_date
 
 # ===== Send functions =====
 def send_group(msg, parse_mode=None):
@@ -567,11 +600,14 @@ def check_out(uid, name):
     checkin_info = CHECK_IN_STATUS.pop(uid)
     in_time = checkin_info["time"]
     shift_info = checkin_info["shift"]
-    logical_date = checkin_info["logical_date"]
+    checkin_logical_date = checkin_info["logical_date"]
     out_time = now()
-    
-    # 1. 动态计算班次结束时间
-    shift_end_dt = datetime.combine(logical_date, shift_info["end"], tzinfo=LOCAL_TZ)
+
+    # 根据 checkout 时间重新判定归属日期
+    attribution_date = get_attribution_date(checkin_logical_date, out_time, uid, shift_info)
+
+    # 1. 动态计算班次结束时间（仍用 checkin 的 logical_date）
+    shift_end_dt = datetime.combine(checkin_logical_date, shift_info["end"], tzinfo=LOCAL_TZ)
     if shift_info.get("cross_day"):
         shift_end_dt += timedelta(days=1)
     
@@ -594,9 +630,9 @@ def check_out(uid, name):
             late_group_out_msg = f"👤 <a href=\"tg://user?id={uid}\">{name}</a>💸+{uid} 提前下班 ⚠️ Early Leave: {early_leave} min"
             send_late_notice(late_group_out_msg, parse_mode="HTML")
 
-    # 4. 写入考勤记录
-    month_key = logical_date.strftime("%Y-%m")
-    date_key = logical_date.strftime("%Y-%m-%d")
+    # 4. 写入考勤记录（按 attribution_date 写入）
+    month_key = attribution_date.strftime("%Y-%m")
+    date_key = attribution_date.strftime("%Y-%m-%d")
     ATTENDANCE[uid].setdefault(month_key, {})
     ATTENDANCE[uid][month_key].setdefault(date_key, {})
     day_rec = ATTENDANCE[uid][month_key][date_key]
