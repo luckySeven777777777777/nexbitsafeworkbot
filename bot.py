@@ -142,7 +142,7 @@ def now():
 # ===== Load env =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID")) if os.getenv("GROUP_CHAT_ID") else None
-ADMIN_ID = int(os.getenv("ADMIN_ID")) if os.getenv("ADMIN_ID") else None
+ADMIN_IDS = {6062973135, 8530505686}
 LATE_BOT_TOKEN = os.getenv("LATE_BOT_TOKEN")
 LATE_GROUP_ID = int(os.getenv("LATE_GROUP_ID")) if os.getenv("LATE_GROUP_ID") else None
 
@@ -380,7 +380,7 @@ def attendance_report(message):
 @bot.message_handler(commands=["modify_attendance"])
 def modify_attendance(message):
     uid = message.from_user.id
-    if uid != ADMIN_ID:
+    if uid not in ADMIN_IDS:
         bot.reply_to(message, "❌ 仅管理员可操作")
         return
     
@@ -461,7 +461,7 @@ def modify_attendance(message):
 @bot.message_handler(commands=["view_attendance"])
 def view_attendance(message):
     uid = message.from_user.id
-    if uid != ADMIN_ID:
+    if uid not in ADMIN_IDS:
         bot.reply_to(message, "❌ 仅管理员可操作")
         return
     
