@@ -53,6 +53,19 @@ def load_attendance():
                     ATTENDANCE[uid][month][day]["late_minutes"] = rec.get("late_minutes", 0)
                     ATTENDANCE[uid][month][day]["early_leave_minutes"] = rec.get("early_leave_minutes", 0)
 
+                    # ===== HR 多 slot 打卡 (checkin_2/checkout_2, checkin_3/checkout_3...) =====
+                    slot = 2
+                    while True:
+                        ck = f"checkin_{slot}"
+                        co = f"checkout_{slot}"
+                        if not rec.get(ck) and not rec.get(co):
+                            break
+                        if rec.get(ck):
+                            ATTENDANCE[uid][month][day][ck] = datetime.fromisoformat(rec[ck])
+                        if rec.get(co):
+                            ATTENDANCE[uid][month][day][co] = datetime.fromisoformat(rec[co])
+                        slot += 1
+
         print("✅ Attendance loaded from JSON")
 
     except Exception as e:
@@ -88,7 +101,7 @@ def save_attendance():
         for month, days in months.items():
             data[str(uid)][month] = {}
             for day, rec in days.items():
-                data[str(uid)][month][day] = {
+                day_data = {
                     "checkin": rec.get("checkin").isoformat() if rec.get("checkin") else None,
                     "checkout": rec.get("checkout").isoformat() if rec.get("checkout") else None,
 
@@ -100,6 +113,19 @@ def save_attendance():
                     "late_minutes": rec.get("late_minutes", 0),
                     "early_leave_minutes": rec.get("early_leave_minutes", 0),
                 }
+                # 保存 HR 多 slot 打卡
+                slot = 2
+                while True:
+                    ck_key = f"checkin_{slot}"
+                    co_key = f"checkout_{slot}"
+                    if not rec.get(ck_key) and not rec.get(co_key):
+                        break
+                    if rec.get(ck_key):
+                        day_data[ck_key] = rec[ck_key].isoformat()
+                    if rec.get(co_key):
+                        day_data[co_key] = rec[co_key].isoformat()
+                    slot += 1
+                data[str(uid)][month][day] = day_data
 
     try:
         with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -205,24 +231,29 @@ def get_attendance_summary(uid):
         for day, rec in days.items():
             full_date = f"{month}-{day[-2:]}"
             if uid in HR_USERS:
-                # HR: checkin + checkout = 1 shift
-                if rec.get("checkin") and rec.get("checkout"):
+                # HR: 统计所有 slot（checkin, checkin_2, checkin_3...）
+                slot = 1
+                while True:
+                    key = "checkin" if slot == 1 else f"checkin_{slot}"
+                    if not rec.get(key):
+                        break
                     total_days.add(full_date)
                     if month == current_month:
                         month_shifts += 1
+                    slot += 1
             elif uid in FINDING_USERS:
-                # Finding: morning and night are independent shifts
-                if rec.get("morning_checkin") and rec.get("morning_checkout"):
+                # Finding: morning_checkin 和 night_checkin 各自独立计数
+                if rec.get("morning_checkin"):
                     total_days.add(full_date)
                     if month == current_month:
                         month_shifts += 1
-                if rec.get("night_checkin") and rec.get("night_checkout"):
+                if rec.get("night_checkin"):
                     total_days.add(full_date)
                     if month == current_month:
                         month_shifts += 1
             else:
-                # Chatting/PROMO: night_checkin + night_checkout = 1 shift
-                if rec.get("night_checkin") and rec.get("night_checkout"):
+                # Chatting/PROMO: 只要有 night_checkin 记录就算一次
+                if rec.get("night_checkin"):
                     total_days.add(full_date)
                     if month == current_month:
                         month_shifts += 1
@@ -433,7 +464,10 @@ def check_out(uid, name):
         elif shift_info["shift"] == "NIGHT":
             day_rec["night_checkout"] = out_time
     else:
-        day_rec["checkout"] = out_time
+        # HR: 使用对应的 slot
+        slot = checkin_info.get("_slot", 1)
+        key_checkout = "checkout" if slot == 1 else f"checkout_{slot}"
+        day_rec[key_checkout] = out_time
     
     save_attendance()
     
@@ -573,7 +607,13 @@ def check_in(uid, name):
         elif shift_info["shift"] == "NIGHT":
             day_rec["night_checkin"] = now_dt
     else:
-        day_rec["checkin"] = now_dt
+        # HR: 找到下一个可用 slot，避免同一天多次打卡互相覆盖
+        slot = 1
+        while day_rec.get(f"checkin_{slot}" if slot > 1 else "checkin"):
+            slot += 1
+        key_checkin = "checkin" if slot == 1 else f"checkin_{slot}"
+        day_rec[key_checkin] = now_dt
+        CHECK_IN_STATUS[uid]["_slot"] = slot
 
     day_rec["late_minutes"] = max(day_rec.get("late_minutes", 0), late_minutes)
 
