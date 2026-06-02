@@ -199,33 +199,34 @@ def get_attendance_summary(uid):
     now_dt = now()
     current_month = now_dt.strftime("%Y-%m")
     total_days = set()
-    month_days = set()
+    month_shifts = 0
 
     for month, days in ATTENDANCE[uid].items():
         for day, rec in days.items():
+            full_date = f"{month}-{day[-2:]}"
             if uid in HR_USERS:
-                # HR: checkin + checkout = 1天
+                # HR: checkin + checkout = 1 shift
                 if rec.get("checkin") and rec.get("checkout"):
-                    full_date = f"{month}-{day[-2:]}"
                     total_days.add(full_date)
                     if month == current_month:
-                        month_days.add(full_date)
+                        month_shifts += 1
             elif uid in FINDING_USERS:
-                # Finding: morning_checkin + morning_checkout + night_checkin + night_checkout = 1天
-                if (rec.get("morning_checkin") and rec.get("morning_checkout") and
-                    rec.get("night_checkin") and rec.get("night_checkout")):
-                    full_date = f"{month}-{day[-2:]}"
+                # Finding: morning and night are independent shifts
+                if rec.get("morning_checkin") and rec.get("morning_checkout"):
                     total_days.add(full_date)
                     if month == current_month:
-                        month_days.add(full_date)
-            else:
-                # Chatting/PROMO: night_checkin + night_checkout = 1天
+                        month_shifts += 1
                 if rec.get("night_checkin") and rec.get("night_checkout"):
-                    full_date = f"{month}-{day[-2:]}"
                     total_days.add(full_date)
                     if month == current_month:
-                        month_days.add(full_date)
-    return len(month_days), len(total_days)
+                        month_shifts += 1
+            else:
+                # Chatting/PROMO: night_checkin + night_checkout = 1 shift
+                if rec.get("night_checkin") and rec.get("night_checkout"):
+                    total_days.add(full_date)
+                    if month == current_month:
+                        month_shifts += 1
+    return month_shifts, len(total_days)
 
 def get_shift_standard(dt, uid):
     t = dt.time()
@@ -437,7 +438,7 @@ def check_out(uid, name):
     save_attendance()
     
     # 5. 获取月度统计
-    month_days, total_days = get_attendance_summary(uid)
+    month_shifts, total_days = get_attendance_summary(uid)
     
     # 6. 发送通知
     msg = (
@@ -448,7 +449,7 @@ def check_out(uid, name):
         f"⏰ Working hours: {duration_str}\n"
         f"{status_msg}\n"
         f"📊 Attendance statistics:\n"
-        f"🗓️ Worked normally this month: {month_days} days\n"
+        f"🗓️ Worked normally this month: {month_shifts} days\n"
         f"📊 Total normal working days: {total_days} days"
     )
 
