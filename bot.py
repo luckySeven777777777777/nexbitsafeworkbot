@@ -233,29 +233,27 @@ def get_attendance_summary(uid):
             continue
         for day, rec in days.items():
             full_date = f"{month}-{day[-2:]}"
-            if uid in HR_USERS:
-                # HR: 统计所有 slot（checkin, checkin_2, checkin_3...）
-                slot = 1
-                while True:
-                    key = "checkin" if slot == 1 else f"checkin_{slot}"
-                    if not rec.get(key):
-                        break
+
+            # 统一统计：遍历所有可能的打卡字段，不区分用户类型
+            # 1. HR 多 slot: checkin, checkin_2, checkin_3...
+            slot = 1
+            while True:
+                key = "checkin" if slot == 1 else f"checkin_{slot}"
+                if rec.get(key):
                     total_days.add(full_date)
                     month_shifts += 1
                     slot += 1
-            elif uid in FINDING_USERS:
-                # Finding: morning_checkin 和 night_checkin 各自独立计数
-                if rec.get("morning_checkin"):
-                    total_days.add(full_date)
-                    month_shifts += 1
-                if rec.get("night_checkin"):
-                    total_days.add(full_date)
-                    month_shifts += 1
-            else:
-                # Chatting/PROMO: 只要有 night_checkin 记录就算一次
-                if rec.get("night_checkin"):
-                    total_days.add(full_date)
-                    month_shifts += 1
+                else:
+                    break
+
+            # 2. FINDING/PROMO: morning_checkin 和 night_checkin
+            if rec.get("morning_checkin"):
+                total_days.add(full_date)
+                month_shifts += 1
+            if rec.get("night_checkin"):
+                total_days.add(full_date)
+                month_shifts += 1
+
     return month_shifts, len(total_days)
 
 def get_shift_standard(dt, uid):
