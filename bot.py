@@ -1006,3 +1006,35 @@ try:
 
 except Exception as e:
     print(f"❌ Failed to apply bot.py patches: {e}")
+
+# ===== [Patch v2.1] Reorder handlers: /set_month_shifts must come before catch-all =====
+try:
+    _handler_list = bot.message_handlers
+    _our_idx = None
+    _catch_all_idx = None
+
+    for i, h in enumerate(_handler_list):
+        f = h.get('function')
+        fname = getattr(f, '__name__', '') if f else ''
+        filters = h.get('filters', {}) if isinstance(h, dict) else {}
+        cmd_filter = filters.get('commands') if isinstance(filters, dict) else None
+
+        if fname == 'set_month_shifts' and cmd_filter == ['set_month_shifts']:
+            _our_idx = i
+        if fname == 'handler' and not cmd_filter:
+            _catch_all_idx = i
+
+    if _our_idx is not None and _catch_all_idx is not None and _our_idx > _catch_all_idx:
+        _moved = _handler_list.pop(_our_idx)
+        # Insert before catch-all (catch_all_idx shifts after pop if our_idx > catch_all_idx)
+        _new_catch_all_idx = next(
+            i for i, h in enumerate(_handler_list)
+            if getattr(h.get('function'), '__name__', '') == 'handler' and not h.get('filters', {}).get('commands')
+        )
+        _handler_list.insert(_new_catch_all_idx, _moved)
+        print("✅ Handler order fixed: /set_month_shifts now before catch-all")
+    else:
+        print("ℹ️ Handler order already correct or handlers not found")
+
+except Exception as e:
+    print(f"❌ Failed to reorder handlers: {e}")
