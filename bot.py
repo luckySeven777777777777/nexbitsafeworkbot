@@ -199,12 +199,14 @@ user_logs = {}
 activity_timeout = {}
 
 # ===== Keyboard =====
-def main_keyboard():
+def main_keyboard(uid=None):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.row("🏢 Check In", "🏠 Check Out")
     kb.row("🍽 Eat", "🚬 Smoking")
     kb.row("💧 Pee", "🚽 Toilet")
     kb.row("📝 Other", "↩ Return")
+    if uid is not None and uid in ADMIN_IDS:
+        kb.row("/set_month_shifts", "/batch_set_month_shifts")
     return kb
 
 # ===== Stats =====
@@ -401,7 +403,7 @@ def start(message):
         f"{status_line}\n\n"
         f"{stats_text(uid)}"
     )
-    bot.send_message(message.chat.id, panel_msg, reply_markup=main_keyboard())
+    bot.send_message(message.chat.id, panel_msg, reply_markup=main_keyboard(uid))
 
 @bot.message_handler(commands=["attendance"])
 def attendance_report(message):
@@ -1032,37 +1034,6 @@ if __name__ == "__main__":
     load_registered_users()
 
     # Reorder handlers: command handlers before catch-all
-    # ===== Admin Keyboard Patch =====
-    def admin_keyboard():
-        """Keyboard with admin commands for privileged users."""
-        kb = ReplyKeyboardMarkup(resize_keyboard=True)
-        kb.row("🏢 Check In", "🏠 Check Out")
-        kb.row("🍽 Eat", "🚬 Smoking")
-        kb.row("💧 Pee", "🚽 Toilet")
-        kb.row("📝 Other", "↩ Return")
-        kb.row("/set_month_shifts", "/batch_set_month_shifts")
-        return kb
-
-    _original_start = start
-    def start(message):
-        if message.from_user.is_bot:
-            return
-        uid = message.from_user.id
-        if uid not in REGISTERED_USERS:
-            REGISTERED_USERS.add(uid)
-            save_registered_users()
-        if uid in CHECK_IN_STATUS:
-            status_line = f"🟢 已上班：{CHECK_IN_STATUS[uid]['time'].strftime('%H:%M:%S')}"
-        else:
-            status_line = "🔴 未上班"
-        panel_msg = (
-            f"✅ 已注册\n"
-            f"{status_line}\n\n"
-            f"{stats_text(uid)}"
-        )
-        kb = admin_keyboard() if uid in ADMIN_IDS else main_keyboard()
-        bot.send_message(message.chat.id, panel_msg, reply_markup=kb)
-
     try:
         hl = bot.message_handlers
         catch_idx = None
