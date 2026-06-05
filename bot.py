@@ -189,7 +189,7 @@ def ordinal(n):
 # ===== 用户配置 =====
 HR_USERS = {6917597442, 7569556703, 7501352060, 6028186424}
 FINDING_USERS = {7406648934, 7375446542, 7450025463, 7773005580, 7977677975, 6438074082,8349071207,8338442147,7756175751,6794723006}
-CUSTOM_NIGHT_USERS = {2055027475, 1204765391, 6863315227, 2018656742, 6635424294, 7794920274, 1625231530, 7961174070, 2094656277, 8101295137,7636774148,1966382979,7995766218}
+CUSTOM_NIGHT_USERS = {6863315227,2018656742,7794920274,6635424294,2094656277,1625231530,7961174070,2055027475,1966382979,7995766218}
 
 # ===== Memory =====
 user_activity = {}
@@ -984,6 +984,46 @@ def set_month_shifts(message):
         )
     except Exception as e:
         bot.reply_to(message, f"❌ 设置失败: {str(e)}")
+
+# Patch 6: /batch_set_month_shifts — bulk set work days
+@bot.message_handler(commands=["batch_set_month_shifts"])
+def batch_set_month_shifts(message):
+    uid = message.from_user.id
+    if uid not in ADMIN_IDS:
+        bot.reply_to(message, "❌ 仅管理员可操作")
+        return
+
+    args = message.text.split()
+    if len(args) < 4:
+        bot.reply_to(
+            message,
+            "用法: /batch_set_month_shifts <年月> <天数> <用户ID1> <用户ID2> ...\n"
+            "例: /batch_set_month_shifts 2026-06 5 6438074082 8349071207 8338442147"
+        )
+        return
+
+    try:
+        month_key = args[1]
+        override_days = int(args[2])
+        user_ids = args[3:]
+
+        results = []
+        for uid_str in user_ids:
+            try:
+                target_uid = int(uid_str)
+                ADMIN_OVERRIDES.setdefault(target_uid, {})
+                ADMIN_OVERRIDES[target_uid][month_key] = override_days
+                results.append(f"✅ {target_uid}")
+            except Exception:
+                results.append(f"❌ {uid_str}")
+
+        save_attendance()
+        bot.reply_to(
+            message,
+            f"批量设置完成 ({month_key}, {override_days}天):\n" + "\n".join(results)
+        )
+    except Exception as e:
+        bot.reply_to(message, f"❌ 批量设置失败: {str(e)}")
 
 print("✅ All patches applied, data path: /data/")
 
