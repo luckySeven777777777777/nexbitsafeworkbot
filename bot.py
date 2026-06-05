@@ -1031,24 +1031,34 @@ if __name__ == "__main__":
     load_attendance()
     load_registered_users()
 
-    # Reorder handlers: /set_month_shifts before catch-all
+    # Reorder handlers: command handlers before catch-all
     try:
         hl = bot.message_handlers
-        our_idx = catch_idx = None
+        catch_idx = None
+        cmd_handlers = []
         for i, h in enumerate(hl):
             fn = getattr(h.get('function'), '__name__', '')
             cmd = h.get('filters', {}).get('commands') if isinstance(h, dict) else None
-            if fn == 'set_month_shifts' and cmd == ['set_month_shifts']:
-                our_idx = i
+            if cmd:
+                cmd_handlers.append((i, h, fn))
             if fn == 'handler' and not cmd:
                 catch_idx = i
-        if our_idx is not None and catch_idx is not None and our_idx > catch_idx:
-            moved = hl.pop(our_idx)
+
+        if catch_idx is not None and cmd_handlers:
+            # Pop all command handlers that are after catch-all, then insert before catch-all
+            moved = []
+            for idx, h, fn in reversed(cmd_handlers):
+                if idx > catch_idx:
+                    moved.append((fn, hl.pop(idx)))
+            moved.reverse()
             new_catch = next(i for i, h in enumerate(hl)
                 if getattr(h.get('function'), '__name__', '') == 'handler'
                 and not h.get('filters', {}).get('commands'))
-            hl.insert(new_catch, moved)
-            print("✅ Handler order: /set_month_shifts before catch-all")
+            for fn, h in moved:
+                hl.insert(new_catch, h)
+                new_catch += 1
+            moved_names = [n for n, _ in moved]
+            print(f"✅ Handler order: {moved_names} before catch-all")
     except Exception as e:
         print("❌ Handler reorder failed:", e)
 
