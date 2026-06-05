@@ -844,16 +844,177 @@ def handler(message):
         back(message)
           
 # ===== Run =====
+# ===== Persistent storage & patches =====
+DATA_FILE = "/data/attendance.json"
+REGISTER_FILE = "/data/registered_users.json"
+ADMIN_OVERRIDES = {}
+
+# Patch 1: load_attendance — strip & keep admin_overrides
+_original_load_attendance = load_attendance
+def load_attendance():
+    global ADMIN_OVERRIDES
+    ADMIN_OVERRIDES = {}
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            overrides_raw = raw.pop("admin_overrides", {})
+            for uid_str, months in overrides_raw.items():
+                ADMIN_OVERRIDES[int(uid_str)] = months
+            with open(DATA_FILE, "w", encoding="utf-8") as f:
+                json.dump(raw, f, ensure_ascii=False, indent=2)
+            if ADMIN_OVERRIDES:
+                print("✅ Admin overrides loaded:", len(ADMIN_OVERRIDES), "users")
+        except Exception as e:
+            print("❌ Failed to extract admin_overrides:", e)
+    _original_load_attendance()
+
+# Patch 2: save_attendance — re-add admin_overrides after write
+_original_save_attendance = save_attendance
+def save_attendance():
+    _original_save_attendance()
+    try:
+        if os.path.exists(DATA_FILE):
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = {}
+        data["admin_overrides"] = {
+            str(uid): months for uid, months in ADMIN_OVERRIDES.items()
+        }
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("❌ Failed to save admin_overrides:", e)
+
+# Patch 3: get_attendance_summary — admin overrides take priority
+_original_get_attendance_summary = get_attendance_summary
+def get_attendance_summary(uid):
+    current_month = now().strftime("%Y-%m")
+    if uid in ADMIN_OVERRIDES and current_month in ADMIN_OVERRIDES[uid]:
+        days = ADMIN_OVERRIDES[uid][current_month]
+        return days, days
+    return _original_get_attendance_summary(uid)
+
+# Patch 4: check_missing_checkins — skip users not in group
+_original_check_missing_checkins = check_missing_checkins
+def check_missing_checkins():
+    while True:
+        try:
+            now_dt = now()
+            today = now_dt.date()
+            for uid in list(REGISTERED_USERS):
+                try:
+                    member = bot.get_chat_member(GROUP_CHAT_ID, uid)
+                    if member.status in ("left", "kicked"):
+                        continue
+                except Exception:
+                    continue
+
+                month_key = today.strftime("%Y-%m")
+                date_key = today.strftime("%Y-%m-%d")
+                rec = ATTENDANCE.get(uid, {}).get(month_key, {}).get(date_key, {})
+
+                if uid in HR_USERS:
+                    limit_dt = datetime.combine(today, time(9, 4), tzinfo=LOCAL_TZ)
+                    key = (uid, "HR_DAY", today)
+                    if limit_dt <= now_dt < limit_dt + timedelta(seconds=60) and key not in MISSED_CHECK_SENT:
+                        if not rec.get("checkin"):
+                            send_late_notice_by_id(uid, "HR")
+                            MISSED_CHECK_SENT.add(key)
+                    continue
+
+                if uid in FINDING_USERS:
+                    m_limit = datetime.combine(today, time(7, 4), tzinfo=LOCAL_TZ)
+                    key_m = (uid, "FINDING_M", today)
+                    if m_limit <= now_dt < m_limit + timedelta(seconds=60) and key_m not in MISSED_CHECK_SENT:
+                        if not rec.get("morning_checkin"):
+                            send_late_notice_by_id(uid, "FINDING 早班")
+                            MISSED_CHECK_SENT.add(key_m)
+
+                    n_limit = datetime.combine(today, time(19, 4), tzinfo=LOCAL_TZ)
+                    key_n = (uid, "FINDING_N", today)
+                    if n_limit <= now_dt < n_limit + timedelta(seconds=60) and key_n not in MISSED_CHECK_SENT:
+                        if not rec.get("night_checkin"):
+                            send_late_notice_by_id(uid, "FINDING 晚班")
+                            MISSED_CHECK_SENT.add(key_n)
+                    continue
+
+                p_limit = datetime.combine(today, time(20, 34), tzinfo=LOCAL_TZ)
+                key_p = (uid, "PROMO_NIGHT_NEW", today)
+                if p_limit <= now_dt < p_limit + timedelta(seconds=60) and key_p not in MISSED_CHECK_SENT:
+                    if not rec.get("checkin") and not rec.get("night_checkin"):
+                        send_late_notice_by_id(uid, "推广/夜班(20:30)")
+                        MISSED_CHECK_SENT.add(key_p)
+
+        except Exception as e:
+            print("❌ missing checkin loop error:", e)
+
+        threading.Event().wait(30)
+
+# Patch 5: /set_month_shifts admin command
+@bot.message_handler(commands=["set_month_shifts"])
+def set_month_shifts(message):
+    uid = message.from_user.id
+    if uid not in ADMIN_IDS:
+        bot.reply_to(message, "❌ 仅管理员可操作")
+        return
+
+    args = message.text.split()
+    if len(args) < 4:
+        bot.reply_to(
+            message,
+            "用法: /set_month_shifts <用户ID> <年月> <天数>\n"
+            "例: /set_month_shifts 6917597442 2024-06 22"
+        )
+        return
+
+    try:
+        target_uid = int(args[1])
+        month_key = args[2]
+        override_days = int(args[3])
+
+        ADMIN_OVERRIDES.setdefault(target_uid, {})
+        ADMIN_OVERRIDES[target_uid][month_key] = override_days
+
+        save_attendance()
+        bot.reply_to(
+            message,
+            f"✅ 已设置用户 {target_uid} 在 {month_key} 的月度工作天数为 {override_days} 天"
+        )
+    except Exception as e:
+        bot.reply_to(message, f"❌ 设置失败: {str(e)}")
+
+print("✅ All patches applied, data path: /data/")
+
 if __name__ == "__main__":
     load_attendance()
     load_registered_users()
 
-    threading.Thread(
-        target=check_missing_checkins,
-        daemon=True
-    ).start()
+    # Reorder handlers: /set_month_shifts before catch-all
+    try:
+        hl = bot.message_handlers
+        our_idx = catch_idx = None
+        for i, h in enumerate(hl):
+            fn = getattr(h.get('function'), '__name__', '')
+            cmd = h.get('filters', {}).get('commands') if isinstance(h, dict) else None
+            if fn == 'set_month_shifts' and cmd == ['set_month_shifts']:
+                our_idx = i
+            if fn == 'handler' and not cmd:
+                catch_idx = i
+        if our_idx is not None and catch_idx is not None and our_idx > catch_idx:
+            moved = hl.pop(our_idx)
+            new_catch = next(i for i, h in enumerate(hl)
+                if getattr(h.get('function'), '__name__', '') == 'handler'
+                and not h.get('filters', {}).get('commands'))
+            hl.insert(new_catch, moved)
+            print("✅ Handler order: /set_month_shifts before catch-all")
+    except Exception as e:
+        print("❌ Handler reorder failed:", e)
 
-    print("🤖 Bot started (JSON persistence)")
+    threading.Thread(target=check_missing_checkins, daemon=True).start()
+
+    print("🤖 Bot started (JSON persistence at /data/)")
 
     bot.infinity_polling(
         skip_pending=True,
@@ -861,180 +1022,3 @@ if __name__ == "__main__":
         long_polling_timeout=20
     )
 
-
-# ===== [Patch v2] Fix three issues via monkey-patching =====
-try:
-    ADMIN_OVERRIDES = {}
-
-    # --- Patch 1: load_attendance — strip admin_overrides before original, keep in memory ---
-    _original_load_attendance = load_attendance
-    def load_attendance():
-        global ADMIN_OVERRIDES
-        ADMIN_OVERRIDES = {}
-        if os.path.exists(DATA_FILE):
-            try:
-                with open(DATA_FILE, "r", encoding="utf-8") as f:
-                    raw = json.load(f)
-                overrides_raw = raw.pop("admin_overrides", {})
-                for uid_str, months in overrides_raw.items():
-                    ADMIN_OVERRIDES[int(uid_str)] = months
-                with open(DATA_FILE, "w", encoding="utf-8") as f:
-                    json.dump(raw, f, ensure_ascii=False, indent=2)
-                if ADMIN_OVERRIDES:
-                    print("✅ Admin overrides loaded:", len(ADMIN_OVERRIDES), "users")
-            except Exception as e:
-                print("❌ Failed to extract admin_overrides:", e)
-        _original_load_attendance()
-
-    # --- Patch 2: save_attendance — re-add admin_overrides after original writes ---
-    _original_save_attendance = save_attendance
-    def save_attendance():
-        _original_save_attendance()
-        try:
-            if os.path.exists(DATA_FILE):
-                with open(DATA_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            else:
-                data = {}
-            data["admin_overrides"] = {
-                str(uid): months for uid, months in ADMIN_OVERRIDES.items()
-            }
-            with open(DATA_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            print("❌ Failed to save admin_overrides:", e)
-
-    # --- Patch 3: get_attendance_summary — admin overrides take priority ---
-    _original_get_attendance_summary = get_attendance_summary
-    def get_attendance_summary(uid):
-        current_month = now().strftime("%Y-%m")
-        if uid in ADMIN_OVERRIDES and current_month in ADMIN_OVERRIDES[uid]:
-            days = ADMIN_OVERRIDES[uid][current_month]
-            return days, days
-        return _original_get_attendance_summary(uid)
-
-    # --- Patch 4: check_missing_checkins — skip users not in group ---
-    _original_check_missing_checkins = check_missing_checkins
-    def check_missing_checkins():
-        while True:
-            try:
-                now_dt = now()
-                today = now_dt.date()
-                for uid in list(REGISTERED_USERS):
-                    try:
-                        member = bot.get_chat_member(GROUP_CHAT_ID, uid)
-                        if member.status in ("left", "kicked"):
-                            continue
-                    except Exception:
-                        continue
-
-                    month_key = today.strftime("%Y-%m")
-                    date_key = today.strftime("%Y-%m-%d")
-                    rec = ATTENDANCE.get(uid, {}).get(month_key, {}).get(date_key, {})
-
-                    if uid in HR_USERS:
-                        limit_dt = datetime.combine(today, time(9, 4), tzinfo=LOCAL_TZ)
-                        key = (uid, "HR_DAY", today)
-                        if limit_dt <= now_dt < limit_dt + timedelta(seconds=60) and key not in MISSED_CHECK_SENT:
-                            if not rec.get("checkin"):
-                                send_late_notice_by_id(uid, "HR")
-                                MISSED_CHECK_SENT.add(key)
-                        continue
-
-                    if uid in FINDING_USERS:
-                        m_limit = datetime.combine(today, time(7, 4), tzinfo=LOCAL_TZ)
-                        key_m = (uid, "FINDING_M", today)
-                        if m_limit <= now_dt < m_limit + timedelta(seconds=60) and key_m not in MISSED_CHECK_SENT:
-                            if not rec.get("morning_checkin"):
-                                send_late_notice_by_id(uid, "FINDING 早班")
-                                MISSED_CHECK_SENT.add(key_m)
-
-                        n_limit = datetime.combine(today, time(19, 4), tzinfo=LOCAL_TZ)
-                        key_n = (uid, "FINDING_N", today)
-                        if n_limit <= now_dt < n_limit + timedelta(seconds=60) and key_n not in MISSED_CHECK_SENT:
-                            if not rec.get("night_checkin"):
-                                send_late_notice_by_id(uid, "FINDING 晚班")
-                                MISSED_CHECK_SENT.add(key_n)
-                        continue
-
-                    p_limit = datetime.combine(today, time(20, 34), tzinfo=LOCAL_TZ)
-                    key_p = (uid, "PROMO_NIGHT_NEW", today)
-                    if p_limit <= now_dt < p_limit + timedelta(seconds=60) and key_p not in MISSED_CHECK_SENT:
-                        if not rec.get("checkin") and not rec.get("night_checkin"):
-                            send_late_notice_by_id(uid, "推广/夜班(20:30)")
-                            MISSED_CHECK_SENT.add(key_p)
-
-            except Exception as e:
-                print("❌ missing checkin loop error:", e)
-
-            threading.Event().wait(30)
-
-    # --- Patch 5: /set_month_shifts admin command ---
-    @bot.message_handler(commands=["set_month_shifts"])
-    def set_month_shifts(message):
-        uid = message.from_user.id
-        if uid not in ADMIN_IDS:
-            bot.reply_to(message, "❌ 仅管理员可操作")
-            return
-
-        args = message.text.split()
-        if len(args) < 4:
-            bot.reply_to(
-                message,
-                "用法: /set_month_shifts <用户ID> <年月> <天数>\n"
-                "例: /set_month_shifts 6917597442 2024-06 22"
-            )
-            return
-
-        try:
-            target_uid = int(args[1])
-            month_key = args[2]
-            override_days = int(args[3])
-
-            ADMIN_OVERRIDES.setdefault(target_uid, {})
-            ADMIN_OVERRIDES[target_uid][month_key] = override_days
-
-            save_attendance()
-            bot.reply_to(
-                message,
-                f"✅ 已设置用户 {target_uid} 在 {month_key} 的月度工作天数为 {override_days} 天"
-            )
-        except Exception as e:
-            bot.reply_to(message, f"❌ 设置失败: {str(e)}")
-
-    print("✅ Bot.py patches applied successfully")
-
-except Exception as e:
-    print(f"❌ Failed to apply bot.py patches: {e}")
-
-# ===== [Patch v2.1] Reorder handlers: /set_month_shifts must come before catch-all =====
-try:
-    _handler_list = bot.message_handlers
-    _our_idx = None
-    _catch_all_idx = None
-
-    for i, h in enumerate(_handler_list):
-        f = h.get('function')
-        fname = getattr(f, '__name__', '') if f else ''
-        filters = h.get('filters', {}) if isinstance(h, dict) else {}
-        cmd_filter = filters.get('commands') if isinstance(filters, dict) else None
-
-        if fname == 'set_month_shifts' and cmd_filter == ['set_month_shifts']:
-            _our_idx = i
-        if fname == 'handler' and not cmd_filter:
-            _catch_all_idx = i
-
-    if _our_idx is not None and _catch_all_idx is not None and _our_idx > _catch_all_idx:
-        _moved = _handler_list.pop(_our_idx)
-        # Insert before catch-all (catch_all_idx shifts after pop if our_idx > catch_all_idx)
-        _new_catch_all_idx = next(
-            i for i, h in enumerate(_handler_list)
-            if getattr(h.get('function'), '__name__', '') == 'handler' and not h.get('filters', {}).get('commands')
-        )
-        _handler_list.insert(_new_catch_all_idx, _moved)
-        print("✅ Handler order fixed: /set_month_shifts now before catch-all")
-    else:
-        print("ℹ️ Handler order already correct or handlers not found")
-
-except Exception as e:
-    print(f"❌ Failed to reorder handlers: {e}")
