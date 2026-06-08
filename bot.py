@@ -889,14 +889,20 @@ def save_attendance():
     except Exception as e:
         print("❌ Failed to save admin_overrides:", e)
 
-# Patch 3: get_attendance_summary — admin overrides take priority
+# Patch 3: get_attendance_summary — auto-calc always runs, admin override only supplements
 _original_get_attendance_summary = get_attendance_summary
 def get_attendance_summary(uid):
+    # 始终先自动计算实际考勤天数（这才是真实数据）
+    auto_month_shifts, auto_total_days = _original_get_attendance_summary(uid)
     current_month = now().strftime("%Y-%m")
+
+    # 如果管理员针对当月设了覆写值，取两者较大值（避免覆写反而拉低真实天数）
     if uid in ADMIN_OVERRIDES and current_month in ADMIN_OVERRIDES[uid]:
-        days = ADMIN_OVERRIDES[uid][current_month]
-        return days, days
-    return _original_get_attendance_summary(uid)
+        override_days = ADMIN_OVERRIDES[uid][current_month]
+        final_days = max(auto_total_days, override_days)
+        return final_days, final_days
+
+    return auto_month_shifts, auto_total_days
 
 # Patch 4: check_missing_checkins — skip users not in group
 _original_check_missing_checkins = check_missing_checkins
