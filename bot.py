@@ -187,8 +187,8 @@ def ordinal(n):
     return f"{n}{ {1:'st', 2:'nd', 3:'rd'}.get(n % 10, 'th') }"
 
 # ===== 用户配置 =====
-HR_USERS = {6917597442, 7569556703, 7501352060, 6028186424}
-FINDING_USERS = {7406648934, 7375446542, 7450025463, 7773005580, 7977677975, 6438074082,8349071207,8338442147,7756175751,6794723006}
+HR_USERS = {6917597442, 7501352060, 6028186424}
+FINDING_USERS = {7375446542, 7977677975, 6438074082,8349071207,8338442147,7756175751,6794723006,7636774148}
 CUSTOM_NIGHT_USERS = {6863315227,2018656742,7794920274,6635424294,2094656277,1625231530,7961174070,2055027475,1966382979,7995766218}
 
 # ===== Memory =====
@@ -664,8 +664,7 @@ def check_out(uid, name):
         f"⏰ Working hours: {duration_str}\n"
         f"{status_msg}\n"
         f"📊 Attendance statistics:\n"
-        f"🗓️ Worked normally this month: {month_shifts} days\n"
-        f"📊 Total normal working days: {total_days} days"
+        f"🗓️ Worked normally this month: {total_days} days"
     )
 
     user_sessions.pop(uid, None) 
@@ -889,22 +888,12 @@ def save_attendance():
     except Exception as e:
         print("❌ Failed to save admin_overrides:", e)
 
-# Patch 3: get_attendance_summary — auto-calc always runs, admin override only supplements
+# Patch 3: get_attendance_summary — auto-calc only, no admin override
 _original_get_attendance_summary = get_attendance_summary
 def get_attendance_summary(uid):
-    # 始终先自动计算实际考勤天数（这才是真实数据）
-    auto_month_shifts, auto_total_days = _original_get_attendance_summary(uid)
-    current_month = now().strftime("%Y-%m")
+    return _original_get_attendance_summary(uid)
 
-    # 如果管理员针对当月设了覆写值，取两者较大值（避免覆写反而拉低真实天数）
-    if uid in ADMIN_OVERRIDES and current_month in ADMIN_OVERRIDES[uid]:
-        override_days = ADMIN_OVERRIDES[uid][current_month]
-        final_days = max(auto_total_days, override_days)
-        return final_days, final_days
-
-    return auto_month_shifts, auto_total_days
-
-# Patch 4: check_missing_checkins — skip users not in group
+# Patch 4: check_missing_checkins — skip admins and users not in group
 _original_check_missing_checkins = check_missing_checkins
 def check_missing_checkins():
     while True:
@@ -912,6 +901,8 @@ def check_missing_checkins():
             now_dt = now()
             today = now_dt.date()
             for uid in list(REGISTERED_USERS):
+                if uid in ADMIN_IDS:
+                    continue
                 try:
                     member = bot.get_chat_member(GROUP_CHAT_ID, uid)
                     if member.status in ("left", "kicked"):
