@@ -187,9 +187,9 @@ def ordinal(n):
     return f"{n}{ {1:'st', 2:'nd', 3:'rd'}.get(n % 10, 'th') }"
 
 # ===== 用户配置 =====
-HR_USERS = {6917597442,8976501178,8163895281,6860714311,7372019166,8553570317}
-FINDING_USERS = {5894768140,8903535637,8503689232,8264851043,8978337525}
-CUSTOM_NIGHT_USERS = {7497606599}
+HR_USERS = {6917597442,8976501178,8163895281,6860714311,7372019166,8553570317,8503689232,7480207243}
+FINDING_USERS = {5894768140,8903535637,8978337525,6333594441}
+CUSTOM_NIGHT_USERS = {7497606599,6517886742,8921820305}
 
 # ===== Memory =====
 user_activity = {}
@@ -657,7 +657,7 @@ def check_out(uid, name):
     
     # 6. 发送通知
     msg = (
-        f"👤 {name}💸+{uid}【Nexbit-Safe】\n"
+        f"👤 {name}💸+{uid}【X-Wallet】\n"
         f"✅ Successfully checked out\n"
         f"📅 Check-in time: {in_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
         f"📅 Check-out time: {out_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
